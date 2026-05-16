@@ -911,9 +911,6 @@ window.fetch = async function(url, opts={}){
 };
 
 /* ── Code executor ─────────────────────────────────────────── */
-// Sandbox iframe built entirely from JS strings joined at runtime.
-// The closing script tag is split across two string literals so the HTML
-// parser never sees </script> and terminates the parent script block.
 (function buildSandboxFrame(){
   var SC = '</scr'+'ipt>';  // never appears literally in source
 

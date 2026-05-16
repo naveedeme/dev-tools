@@ -1434,46 +1434,75 @@ window.addEventListener('unhandledrejection', ev=>{
 function refreshElements(){
   const tree = document.getElementById('domTree');
   tree.innerHTML = '';
-  renderDomNode(document.documentElement, tree, 0);
+  // Skip script/style/template nodes — they freeze the browser with huge text content.
+  // Render only the meaningful visible DOM: html > head (collapsed) + body children.
+  // Use lazy expansion: children only rendered when the toggle is clicked.
+  renderDomLazy(document.documentElement, tree, 0);
 }
 
-function renderDomNode(node, container, depth){
+// Tags whose text content we never expand inline — too large / irrelevant
+const SKIP_TAGS = new Set(['script','style','template','noscript']);
+
+// Render one element node; children are loaded lazily on toggle click
+function renderDomLazy(node, container, depth){
   if(node.nodeType === Node.TEXT_NODE){
     const text = node.textContent.trim();
-    if(!text) return;
+    if(!text || text.length < 1) return;
     const div = document.createElement('div');
-    div.className='dom-node';
-    div.style.paddingLeft=(depth*14+16)+'px';
-    div.innerHTML='<span class="dn-text">'+esc(text.slice(0,80))+(text.length>80?'…':'')+'</span>';
+    div.className = 'dom-node';
+    div.style.paddingLeft = (depth*14+16)+'px';
+    div.innerHTML = '<span class="dn-text">'+esc(text.slice(0,120))+(text.length>120?'…':'')+'</span>';
     container.appendChild(div);
     return;
   }
   if(node.nodeType === Node.COMMENT_NODE){
+    const text = node.textContent.trim();
+    if(!text) return;
     const div = document.createElement('div');
-    div.className='dom-node';
-    div.style.paddingLeft=(depth*14+16)+'px';
-    div.innerHTML='<span class="dn-cmt">&lt;!-- '+esc(node.textContent.trim().slice(0,60))+' --&gt;</span>';
+    div.className = 'dom-node';
+    div.style.paddingLeft = (depth*14+16)+'px';
+    div.innerHTML = '<span class="dn-cmt">&lt;!-- '+esc(text.slice(0,60))+(text.length>60?'…':'')+' --&gt;</span>';
     container.appendChild(div);
     return;
   }
   if(node.nodeType !== Node.ELEMENT_NODE) return;
 
-  const hasChildren = node.childNodes.length > 0;
-  const tag = node.tagName.toLowerCase();
-  const attrsHtml = Array.from(node.attributes).map(a=>
-    ' <span class="dn-attr">'+esc(a.name)+'</span>=<span class="dn-str">"'+esc(a.value.slice(0,40))+'"</span>'
-  ).join('');
+  const tag         = node.tagName.toLowerCase();
+  const isSkipped   = SKIP_TAGS.has(tag);
+  // Count only element children (ignore pure whitespace text nodes)
+  const elemChildren = Array.from(node.childNodes).filter(function(ch){
+    if(ch.nodeType === Node.TEXT_NODE) return ch.textContent.trim().length > 0;
+    return ch.nodeType === Node.ELEMENT_NODE || ch.nodeType === Node.COMMENT_NODE;
+  });
+  const hasChildren = elemChildren.length > 0 && !isSkipped;
+
+  const attrsHtml = Array.from(node.attributes).slice(0,8).map(function(a){
+    const val = a.value.length > 50 ? a.value.slice(0,50)+'…' : a.value;
+    return ' <span class="dn-attr">'+esc(a.name)+'</span>=<span class="dn-str">"'+esc(val)+'"</span>';
+  }).join('');
 
   const row = document.createElement('div');
   row.className = 'dom-node';
   row.style.paddingLeft = (depth*14+4)+'px';
 
-  const toggle = hasChildren ? '<span class="dn-toggle" data-open="1">▼</span>' : '<span style="display:inline-block;width:12px;"></span>';
-  row.innerHTML = toggle+'<span class="dn-tag">&lt;'+esc(tag)+'</span>'+attrsHtml+'<span class="dn-tag">&gt;</span>';
+  const toggleHtml = hasChildren
+    ? '<span class="dn-toggle" data-open="0">▶</span>'
+    : '<span style="display:inline-block;width:14px"></span>';
 
-  row.addEventListener('click', e=>{
+  const skippedHint = isSkipped
+    ? ' <span style="color:var(--text2);font-size:11px;">('+node.childNodes.length+' nodes hidden)</span>'
+    : '';
+
+  row.innerHTML = toggleHtml
+    + '<span class="dn-tag">&lt;'+esc(tag)+'</span>'
+    + attrsHtml
+    + '<span class="dn-tag">&gt;</span>'
+    + (hasChildren ? '<span style="color:var(--text2)"> … </span><span class="dn-tag">&lt;/'+esc(tag)+'&gt;</span>' : '')
+    + skippedHint;
+
+  row.addEventListener('click', function(e){
     if(e.target.classList.contains('dn-toggle')) return;
-    document.querySelectorAll('.dom-node').forEach(n=>n.classList.remove('selected'));
+    document.querySelectorAll('.dom-node.selected').forEach(function(n){ n.classList.remove('selected'); });
     row.classList.add('selected');
     State.selectedDomNode = node;
     showStyles(node);
@@ -1483,27 +1512,52 @@ function renderDomNode(node, container, depth){
 
   if(hasChildren){
     const childWrap = document.createElement('div');
-    childWrap.className='dom-children';
+    childWrap.className = 'dom-children collapsed'; // start collapsed
     container.appendChild(childWrap);
 
-    node.childNodes.forEach(child=>renderDomNode(child, childWrap, depth+1));
-
-    const closeRow = document.createElement('div');
-    closeRow.className='dom-node';
-    closeRow.style.paddingLeft=(depth*14+16)+'px';
-    closeRow.innerHTML='<span class="dn-tag">&lt;/'+esc(tag)+'&gt;</span>';
-    container.appendChild(closeRow);
+    let loaded = false;
 
     const tog = row.querySelector('.dn-toggle');
-    if(tog){
-      tog.addEventListener('click', ()=>{
-        const open = tog.dataset.open==='1';
-        childWrap.classList.toggle('collapsed', open);
-        closeRow.style.display = open ? 'none' : '';
-        tog.textContent = open ? '▶' : '▼';
-        tog.dataset.open = open ? '0' : '1';
-      });
-    }
+    tog.addEventListener('click', function(){
+      const isOpen = tog.dataset.open === '1';
+      if(isOpen){
+        // Collapse
+        childWrap.classList.add('collapsed');
+        // Restore the ellipsis summary in the opening tag row
+        const existingClose = row.querySelector('.dn-close-tag');
+        if(!existingClose){
+          const summary = row.querySelector('span[style*="text2"]');
+          if(summary){ summary.style.display=''; }
+          const closeTag = row.querySelectorAll('.dn-tag');
+          if(closeTag.length > 1) closeTag[closeTag.length-1].style.display='';
+        }
+        tog.textContent = '▶';
+        tog.dataset.open = '0';
+      } else {
+        // Expand — lazy load children on first open
+        if(!loaded){
+          loaded = true;
+          childWrap.innerHTML = '';
+          elemChildren.forEach(function(child){
+            renderDomLazy(child, childWrap, depth+1);
+          });
+          // Add closing tag row
+          const closeRow = document.createElement('div');
+          closeRow.className = 'dom-node';
+          closeRow.style.paddingLeft = (depth*14+16)+'px';
+          closeRow.innerHTML = '<span class="dn-tag">&lt;/'+esc(tag)+'&gt;</span>';
+          childWrap.appendChild(closeRow);
+          // Hide the inline "… </tag>" summary
+          const inlineSummary = row.querySelector('span[style*="text2"]');
+          if(inlineSummary) inlineSummary.style.display='none';
+          const inlineTags = row.querySelectorAll('.dn-tag');
+          if(inlineTags.length > 1) inlineTags[inlineTags.length-1].style.display='none';
+        }
+        childWrap.classList.remove('collapsed');
+        tog.textContent = '▼';
+        tog.dataset.open = '1';
+      }
+    });
   }
 }
 

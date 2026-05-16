@@ -1178,10 +1178,12 @@ document.getElementById('btnRun').addEventListener('click', ()=>{
 
 /* ── Autocomplete ──────────────────────────────────────────── */
 (function(){
-  var box   = document.getElementById('acBox');
-  var inp   = document.getElementById('consoleInput');
+  var box   = null;  /* lazy — DOM not ready at parse time */
+  var inp   = null;
   var list  = [];
   var cur   = -1;
+  function getBox(){ if(!box) box = document.getElementById('acBox'); return box; }
+  function getInp(){ if(!inp) inp = document.getElementById('consoleInput'); return inp; }
 
   /* completion sources */
   var KW = 'const let var function class return if else for while do switch case break continue try catch finally throw new delete typeof instanceof in of async await true false null undefined this'.split(' ');
@@ -1321,26 +1323,26 @@ document.getElementById('btnRun').addEventListener('click', ()=>{
       if (item.d) html += '<span class="acd">'+item.d+'</span>';
       html += '</div>';
     });
-    box.innerHTML = html;
-    box.querySelectorAll('.aci').forEach(function(el) {
+    getBox().innerHTML = html;
+    getBox().querySelectorAll('.aci').forEach(function(el) {
       el.addEventListener('mousedown', function(e) {
         e.preventDefault();
         apply(list[+el.getAttribute('data-i')]);
       });
     });
-    var rect = inp.getBoundingClientRect();
+    var rect = getInp().getBoundingClientRect();
     var ddH  = Math.min(items.length * 26 + 4, 220);
-    box.style.left    = rect.left + 'px';
-    box.style.top     = (rect.top - ddH - 6) + 'px';
-    box.style.width   = Math.max(rect.width, 260) + 'px';
-    box.style.display = 'block';
+    getBox().style.left    = rect.left + 'px';
+    getBox().style.top     = (rect.top - ddH - 6) + 'px';
+    getBox().style.width   = Math.max(rect.width, 260) + 'px';
+    getBox().style.display = 'block';
   }
 
-  function hide() { box.style.display='none'; list=[]; cur=-1; }
+  function hide() { getBox().style.display='none'; list=[]; cur=-1; }
 
   function setActive(idx) {
     cur = idx;
-    box.querySelectorAll('.aci').forEach(function(el, i) {
+    getBox().querySelectorAll('.aci').forEach(function(el, i) {
       el.classList.toggle('on', i===idx);
       if (i===idx) el.scrollIntoView({block:'nearest'});
     });
@@ -1348,8 +1350,8 @@ document.getElementById('btnRun').addEventListener('click', ()=>{
 
   function apply(item) {
     if (!item) return;
-    var val    = inp.value;
-    var pos    = inp.selectionStart;
+    var val    = getInp().value;
+    var pos    = getInp().selectionStart;
     var ctx    = getCtx(val.slice(0, pos));
     if (!ctx) { hide(); return; }
     var insert = item.v || item.n;
@@ -1361,32 +1363,32 @@ document.getElementById('btnRun').addEventListener('click', ()=>{
     }
     var before = val.slice(0, pos - pfxLen);
     var after  = val.slice(pos);
-    inp.value  = before + insert + after;
+    getInp().value  = before + insert + after;
     /* cursor: inside parens if present */
     var np = before.length + insert.length;
     var pi = insert.indexOf('()');
     if (pi !== -1) np = before.length + pi + 1;
-    inp.selectionStart = inp.selectionEnd = np;
+    getInp().selectionStart = getInp().selectionEnd = np;
     autoResize(inp);
     hide();
-    inp.focus();
+    getInp().focus();
   }
 
   /* input event */
-  inp.addEventListener('input', function() {
-    var before = inp.value.slice(0, inp.selectionStart);
+  getInp().addEventListener('input', function() {
+    var before = getInp().value.slice(0, getInp().selectionStart);
     var ctx = getCtx(before);
     if (!ctx || ctx.pfx.length < 1) { hide(); return; }
     render(completions(before), ctx.pfx);
   });
 
   /* keydown — bubble phase only, only intercept when dropdown open or Tab */
-  inp.addEventListener('keydown', function(e) {
-    var open = box.style.display !== 'none';
+  getInp().addEventListener('keydown', function(e) {
+    var open = getBox().style.display !== 'none';
     if (e.key === 'Tab') {
       e.preventDefault();
       if (!open) {
-        var before = inp.value.slice(0, inp.selectionStart);
+        var before = getInp().value.slice(0, getInp().selectionStart);
         var ctx = getCtx(before);
         if (ctx && ctx.pfx.length >= 1) {
           var items = completions(before);
@@ -1407,7 +1409,7 @@ document.getElementById('btnRun').addEventListener('click', ()=>{
     }
   });
 
-  inp.addEventListener('blur',   function(){ setTimeout(hide, 130); });
+  getInp().addEventListener('blur',   function(){ setTimeout(hide, 130); });
   window.addEventListener('resize', hide);
 })();
 /* ── end Autocomplete ──────────────────────────────────────── */

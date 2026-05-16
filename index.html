@@ -1064,7 +1064,6 @@ window.addEventListener('message', function(e){
 
   if (e.data.type === 'CONSOLE'){
     // Skip relay if Sources panel has its own console intercept active
-    if (window.__suppressSandboxConsole) return;
     var method = e.data.method;
     var args = (e.data.args || []).map(function(a){
       try { return JSON.parse(a); } catch(ex){ return a; }
@@ -1731,7 +1730,7 @@ function showStyles(node){
     srcReturnVal.style.display = 'none';
     srcReturnVal.textContent = '';
     srcRunStatus.textContent = '';
-    reactPreview.srcdoc = '';
+    reactPreview.src = 'about:blank';
   }
 
   document.getElementById('clearOutputBtn').addEventListener('click', clearSrcOutput);
@@ -1788,126 +1787,167 @@ function showStyles(node){
     var fname = codeFilename.value || 'snippet';
     srcRunStatus.textContent = 'Running\u2026';
     srcRunStatus.style.color = 'var(--text2)';
-
-    // Echo to global console tab
     addEntry('input-echo',
       '<span style="opacity:.5">\u25b6 </span><i style="color:var(--text2)">'+esc(fname)+'</i>', 'snippet');
 
     if(srcMode==='react'){ runReact(code, fname); return; }
 
-    // JS mode — intercept console locally
-    window.__suppressSandboxConsole = true;
-    var origLog   = console.log;
-    var origError = console.error;
-    var origWarn  = console.warn;
-    var origInfo  = console.info;
-    var origTable = console.table;
+    // JS mode
+    // The sandbox iframe runs the code and proxies console back via postMessage.
+    // We intercept those CONSOLE messages directly for the src output pane,
+    // instead of wrapping parent console methods (which don't see sandbox calls).
+    var done = false;
+    function srcConsoleHandler(e){
+      if(!e.data || e.data.type !== 'CONSOLE') return;
+      if(done) return;
+      var method = e.data.method;
+      var args = (e.data.args||[]).map(function(a){ try{ return JSON.parse(a); }catch(ex){ return a; } });
+      var html = args.map(function(v){ return fmt(v); }).join(' ');
+      var raw  = args.map(String).join(' ');
+      if(method==='error'){
+        addSrcLog('error', '\u26d4 '+args.map(function(v){return esc(String(v));}).join(' '));
+        State.errC++; updateCounts();
+      } else if(method==='warn'){
+        addSrcLog('warn', '\u26a0 '+args.map(function(v){return esc(String(v));}).join(' '));
+        State.warnC++; updateCounts();
+      } else if(method==='info'){
+        addSrcLog('info', '\u2139 '+html);
+      } else if(method==='table'){
+        try{
+          var rows=Array.isArray(args[0])?args[0]:[args[0]]; var keys=Object.keys(rows[0]||{});
+          var t='<table style="border-collapse:collapse;font-size:11px"><tr><th style="border:1px solid #3c3c3c;padding:2px 8px;color:var(--blue)">(idx)</th>'+
+            keys.map(function(k){return '<th style="border:1px solid #3c3c3c;padding:2px 8px;color:var(--blue)">'+esc(k)+'</th>';}).join('')+'</tr>';
+          rows.forEach(function(r,i){
+            t+='<tr><td style="border:1px solid #3c3c3c;padding:2px 6px;color:var(--text2)">'+i+'</td>'+
+              keys.map(function(k){return '<td style="border:1px solid #3c3c3c;padding:2px 6px">'+fmt(r[k],2)+'</td>';}).join('')+'</tr>';
+          });
+          t+='</table>'; addSrcLog('log', t);
+        }catch(ex){ addSrcLog('log', html); }
+      } else {
+        addSrcLog('log', html);
+      }
+      // Also mirror to global console tab (not suppressed — we handle it here)
+      addEntry(method==='error'?'error':method==='warn'?'warn':'log', html, raw);
+    }
+    window.addEventListener('message', srcConsoleHandler);
 
-    console.log   = function(){ var a=Array.from(arguments); origLog.apply(console,a);   addSrcLog('log',   a.map(function(v){return fmt(v);}).join(' ')); };
-    console.error = function(){ var a=Array.from(arguments); origError.apply(console,a); addSrcLog('error', '\u26d4 '+a.map(function(v){return esc(String(v));}).join(' ')); State.errC++;updateCounts(); };
-    console.warn  = function(){ var a=Array.from(arguments); origWarn.apply(console,a);  addSrcLog('warn',  '\u26a0 '+a.map(function(v){return esc(String(v));}).join(' ')); State.warnC++;updateCounts(); };
-    console.info  = function(){ var a=Array.from(arguments); origInfo.apply(console,a);  addSrcLog('info',  '\u2139 '+a.map(function(v){return esc(String(v));}).join(' ')); };
-    console.table = function(data){
-      origTable.call(console,data);
-      try{
-        var rows=Array.isArray(data)?data:[data]; var keys=Object.keys(rows[0]||{});
-        var t='<table style="border-collapse:collapse;font-size:11px"><tr><th style="border:1px solid #3c3c3c;padding:2px 8px;color:var(--blue)">(idx)</th>'+
-          keys.map(function(k){return '<th style="border:1px solid #3c3c3c;padding:2px 8px;color:var(--blue)">'+esc(k)+'</th>';}).join('')+'</tr>';
-        rows.forEach(function(r,i){
-          t+='<tr><td style="border:1px solid #3c3c3c;padding:2px 6px;color:var(--text2)">'+i+'</td>'+
-            keys.map(function(k){return '<td style="border:1px solid #3c3c3c;padding:2px 6px">'+fmt(r[k],2)+'</td>';}).join('')+'</tr>';
-        });
-        t+='</table>'; addSrcLog('log',t);
-      }catch(e){ addSrcLog('log',fmt(data)); }
-    };
-
-    var t0=performance.now();
+    var t0 = performance.now();
     try{
       var result = await execCode(code);
-      var ms=(performance.now()-t0).toFixed(1);
-      srcRunStatus.textContent='\u2714 Done in '+ms+'ms';
-      srcRunStatus.style.color='var(--green)';
-      if(result!==undefined){
-        addSrcLog('result','\u2190 '+fmt(result));
-        addEntry('result','\u2190 '+fmt(result), String(result));
-        srcReturnVal.textContent='\u2190 Return value: '+String(result);
-        srcReturnVal.style.display='block';
+      var ms = (performance.now()-t0).toFixed(1);
+      done = true;
+      window.removeEventListener('message', srcConsoleHandler);
+      srcRunStatus.textContent = '\u2714 Done in '+ms+'ms';
+      srcRunStatus.style.color = 'var(--green)';
+      if(result !== undefined){
+        addSrcLog('result', '\u2190 '+fmt(result));
+        addEntry('result', '\u2190 '+fmt(result), String(result));
+        srcReturnVal.textContent = '\u2190 Return value: '+String(result);
+        srcReturnVal.style.display = 'block';
       }
       switchOutTab('console');
-    }catch(err){
-      var ms2=(performance.now()-t0).toFixed(1);
-      srcRunStatus.textContent='\u26d4 Error after '+ms2+'ms';
-      srcRunStatus.style.color='var(--red)';
-      addSrcLog('error','\u26d4 '+esc(err.toString()));
-      addEntry('error','\u26d4 '+esc(err.toString()), err.toString());
+    } catch(err){
+      done = true;
+      window.removeEventListener('message', srcConsoleHandler);
+      var ms2 = (performance.now()-t0).toFixed(1);
+      srcRunStatus.textContent = '\u26d4 Error after '+ms2+'ms';
+      srcRunStatus.style.color = 'var(--red)';
+      addSrcLog('error', '\u26d4 '+esc(err.toString()));
+      addEntry('error', '\u26d4 '+esc(err.toString()), err.toString());
       State.errC++; updateCounts();
       switchOutTab('console');
     }
-    console.log   = origLog;
-    console.error = origError;
-    console.warn  = origWarn;
-    console.info  = origInfo;
-    console.table = origTable;
-    window.__suppressSandboxConsole = false;
   }
 
-  /* React runner */
+  /* React runner — uses a Blob URL so no srcdoc escaping issues ever */
   function runReact(code, fname){
-    // Code is passed via postMessage — no string interpolation, no escaping issues.
-    // Sequence: set srcdoc -> iframe signals IFRAME_READY -> parent sends code -> Babel transpiles -> component renders -> REACT_READY fires.
-    var iframeDoc = '<!DOCTYPE html><html><head><meta charset="UTF-8">'
-      + '<style>'
-      + '*{box-sizing:border-box;margin:0;padding:0;}'
-      + 'body{background:#1a1a1a;font-family:sans-serif;color:#ccc;min-height:100vh;}'
-      + '#loading{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;color:#555;font-size:13px;flex-direction:column;gap:10px;}'
-      + '.spin{width:22px;height:22px;border:2px solid #333;border-top-color:#007acc;border-radius:50%;animation:s .8s linear infinite;}'
-      + '@keyframes s{to{transform:rotate(360deg)}}'
-      + '#dt-err{color:#f44747;background:rgba(244,71,71,.08);padding:16px;font-family:monospace;font-size:13px;white-space:pre-wrap;border-left:3px solid #f44747;margin:16px;}'
-      + '<\/style>'
-      + '<\/head><body>'
-      + '<div id="loading"><div class="spin"><\/div>Loading React\u2026<\/div>'
-      + '<div id="root"><\/div>'
-      + '<script src="https://unpkg.com/react@18/umd/react.development.js"><\/script>'
-      + '<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"><\/script>'
-      + '<script src="https://unpkg.com/@babel/standalone/babel.min.js"><\/script>'
-      + '<script>'
-      + 'window.addEventListener("message",function(e){'
-      +   'if(!e.data||e.data.type!=="RUN_REACT")return;'
-      +   'document.getElementById("loading").style.display="none";'
-      +   'var userCode=e.data.code;'
-      +   'try{'
-      +     'var out=Babel.transform(userCode,{presets:["react"]}).code;'
-      +     'var boot="(function(){\\n"'
-      +       '+"var names=("+JSON.stringify(userCode)+".match(/(?:function|class)\\\\s+([A-Z][A-Za-z0-9_]*)|const\\\\s+([A-Z][A-Za-z0-9_]*)\\\\s*=/g)||[]).map(function(x){var r=x.match(/([A-Z][A-Za-z0-9_]+)/);return r?r[1]:null;}).filter(Boolean);\\n"'
-      +       '+"var root=ReactDOM.createRoot(document.getElementById(\'root\'));\\n"'
-      +       '+"var done=false;\\n"'
-      +       '+"for(var i=names.length-1;i>=0;i--){try{var C=eval(names[i]);if(typeof C===\'function\'){root.render(React.createElement(C));done=true;break;}}catch(ex){}}\\n"'
-      +       '+"if(!done){try{root.render(React.createElement(App));done=true;}catch(ex){}}\\n"'
-      +       '+"if(!done){document.getElementById(\'root\').innerHTML=\'<div id=dt-err>No renderable component found. Define a React function component with a capital letter name.<\\/div>\';}\\n"'
-      +       '+"window.parent.postMessage({type:\'REACT_READY\',ok:true},\'*\');\\n"'
-      +     '+"})();";'
-      +     'var el=document.createElement("script");'
-      +     'el.textContent=out+"\\n"+boot;'
-      +     'document.body.appendChild(el);'
-      +   '}catch(err){'
-      +     'document.getElementById("root").innerHTML="<div id=\'dt-err\'>"+err.toString()+"<\/div>";'
-      +     'window.parent.postMessage({type:"REACT_READY",ok:false,error:err.toString()},"*");'
-      +   '}'
-      + '});'
-      + 'window.parent.postMessage({type:"IFRAME_READY"},"*");'
-      + '<\/script>'
-      + '<\/body><\/html>';
-
     switchOutTab('preview');
     srcRunStatus.textContent = '\u23f3 Loading React CDN\u2026';
     srcRunStatus.style.color = 'var(--text2)';
     var t0 = performance.now();
 
+    // Build iframe HTML as Blob — same technique as the sandbox frame.
+    // Split </script> across two strings so HTML parser never sees it.
+    var SC = '</scr'+'ipt>';
+    var reactLines = [
+      '<!DOCTYPE html><html><head><meta charset="UTF-8">',
+      '<style>',
+      '*{box-sizing:border-box;margin:0;padding:0;}',
+      'body{background:#1a1a1a;font-family:sans-serif;color:#ccc;min-height:100vh;}',
+      '#loading{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;',
+      '  color:#555;font-size:13px;flex-direction:column;gap:10px;}',
+      '.spin{width:22px;height:22px;border:2px solid #333;border-top-color:#007acc;',
+      '  border-radius:50%;animation:sp .8s linear infinite;}',
+      '@keyframes sp{to{transform:rotate(360deg)}}',
+      '#dt-err{color:#f44747;background:rgba(244,71,71,.08);padding:16px;',
+      '  font-family:monospace;font-size:13px;white-space:pre-wrap;',
+      '  border-left:3px solid #f44747;margin:16px;}',
+      '</style></head><body>',
+      '<div id="loading"><div class="spin"></div>Loading React\u2026</div>',
+      '<div id="root"></div>',
+      '<scr'+'ipt src="https://unpkg.com/react@18/umd/react.development.js">'+SC,
+      '<scr'+'ipt src="https://unpkg.com/react-dom@18/umd/react-dom.development.js">'+SC,
+      '<scr'+'ipt src="https://unpkg.com/@babel/standalone/babel.min.js">'+SC,
+      '<scr'+'ipt>',
+      // Wait for postMessage with user code, then Babel-transform and render
+      'window.addEventListener("message", function(e) {',
+      '  if (!e.data || e.data.type !== "RUN_REACT") return;',
+      '  document.getElementById("loading").style.display = "none";',
+      '  var userCode = e.data.code;',
+      '  try {',
+      '    var transformed = Babel.transform(userCode, {',
+      '      presets: ["react"],',
+      '      plugins: ["transform-class-properties"]',
+      '    }).code;',
+      '    var names = (userCode.match(/(?:function|class)\\s+([A-Z][A-Za-z0-9_]*)/g)||[])',
+      '      .map(function(x){ var r=x.match(/([A-Z][A-Za-z0-9_]+)/); return r?r[1]:null; })',
+      '      .filter(Boolean);',
+      '    var constNames = (userCode.match(/const\\s+([A-Z][A-Za-z0-9_]*)\\s*=/g)||[])',
+      '      .map(function(x){ var r=x.match(/([A-Z][A-Za-z0-9_]+)/); return r?r[1]:null; })',
+      '      .filter(Boolean);',
+      '    names = names.concat(constNames);',
+      '    var script = document.createElement("script");',
+      '    script.textContent = transformed + "\\n(function(){" +',
+      '      "var root = ReactDOM.createRoot(document.getElementById(\\"root\\"));\\n" +',
+      '      "var done = false;\\n" +',
+      '      "var allNames = " + JSON.stringify(names) + ";\\n" +',
+      '      "for(var i=allNames.length-1;i>=0&&!done;i--){" +',
+      '        "try{var C=eval(allNames[i]);if(typeof C===\'function\'||typeof C===\'object\'){root.render(React.createElement(C));done=true;}}catch(ex){}" +',
+      '      "}" +',
+      '      "if(!done){" +',
+      '        "try{root.render(React.createElement(App));done=true;}catch(ex){}" +',
+      '      "}" +',
+      '      "if(!done){document.getElementById(\\"root\\").innerHTML=\'<p style=\\"color:#f44747;padding:16px\\">No renderable React component found. Define a function/class component with a Capital letter name.</p>\'}" +',
+      '      "window.parent.postMessage({type:\'REACT_READY\',ok:true},\'*\');" +',
+      '    "})();";',
+      '    document.body.appendChild(script);',
+      '  } catch(err) {',
+      '    document.getElementById("root").innerHTML =',
+      '      "<div id=\'dt-err\'>" + err.toString() + "</div>";',
+      '    window.parent.postMessage({type:"REACT_READY",ok:false,error:err.toString()},"*");',
+      '  }',
+      '});',
+      // Signal parent AFTER all scripts have loaded — use window.onload
+      'window.onload = function() {',
+      '  window.parent.postMessage({type:"IFRAME_READY"},"*");',
+      '};',
+      SC,
+      '</body></html>'
+    ];
+
+    var html  = reactLines.join('\n');
+    var blob  = new Blob([html], { type: 'text/html' });
+    var url   = URL.createObjectURL(blob);
+
+    // Clean up previous handler and object URL
     if(runReact._handler) window.removeEventListener('message', runReact._handler);
+    if(runReact._blobUrl) URL.revokeObjectURL(runReact._blobUrl);
+    runReact._blobUrl = url;
+
     runReact._handler = function(e){
       if(!e.data || !e.data.type) return;
       if(e.data.type === 'IFRAME_READY'){
-        srcRunStatus.textContent = '\u23f3 Transpiling\u2026';
+        srcRunStatus.textContent = '\u23f3 Transpiling JSX\u2026';
         try{ reactPreview.contentWindow.postMessage({type:'RUN_REACT', code: code}, '*'); }catch(ex){}
       }
       if(e.data.type === 'REACT_READY'){
@@ -1919,11 +1959,13 @@ function showStyles(node){
         } else {
           srcRunStatus.textContent = '\u26d4 '+(e.data.error||'Render error');
           srcRunStatus.style.color = 'var(--red)';
+          addSrcLog('error', '\u26d4 '+(e.data.error||'Render error'));
+          switchOutTab('console');
         }
       }
     };
     window.addEventListener('message', runReact._handler);
-    reactPreview.srcdoc = iframeDoc;
+    reactPreview.src = url;
   }
 
   document.getElementById('runSnippetBtn').addEventListener('click', runSnippet);

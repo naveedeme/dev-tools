@@ -911,29 +911,27 @@ window.fetch = async function(url, opts={}){
 };
 
 /* ── Code executor ─────────────────────────────────────────── */
-// Strategy: run all code inside a single long-lived iframe that shares a true
-// persistent JS scope. Variables declared with const/let/var all persist because
-// they live in the same iframe's global scope across multiple eval() calls.
-// The iframe communicates results back via postMessage.
-
+// Sandbox iframe built entirely from JS strings joined at runtime.
+// The closing script tag is split across two string literals so the HTML
+// parser never sees </script> and terminates the parent script block.
 (function buildSandboxFrame(){
-  // Build iframe content as a Blob URL — avoids ALL srcdoc/attribute escaping issues.
-  // The script runs in the iframe's own persistent global scope.
-  var sandboxScript = [
-    '<!DOCTYPE html><html><body><script>',
-    'var AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;',
+  var SC = '</scr'+'ipt>';  // never appears literally in source
 
-    // sendResult / sendError helpers
+  var sandboxLines = [
+    '<!DOCTYPE html><html><body>',
+    '<scr'+'ipt>',
+    'var AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;',
+    '',
     'function sendResult(id, src, result) {',
-    '  var s; try { s = result === undefined ? "__undefined__" : JSON.stringify(result); }',
+    '  var s;',
+    '  try { s = result === undefined ? "__undefined__" : JSON.stringify(result); }',
     '  catch(ex) { s = JSON.stringify(String(result)); }',
     '  src.postMessage({ type: "EXEC_RESULT", id: id, ok: true, result: s }, "*");',
     '}',
     'function sendError(id, src, err) {',
     '  src.postMessage({ type: "EXEC_RESULT", id: id, ok: false, error: err.toString() }, "*");',
     '}',
-
-    // Variable persistence helper — runs after user code to copy declared names onto window
+    '',
     'function persistVars(code) {',
     '  var names = [];',
     '  var r1 = /(?:^|[\\n;])[ \\t]*(?:const|let|var)[ \\t]+([a-zA-Z_$][a-zA-Z0-9_$]*)/g, m;',
@@ -945,12 +943,11 @@ window.fetch = async function(url, opts={}){
     '      if (/^[a-zA-Z_$]/.test(n)) names.push(n);',
     '    });',
     '  }',
-    '  return names.filter(function(n,i,a){return a.indexOf(n)===i;}).map(function(n) {',
+    '  return names.filter(function(n,i,a){ return a.indexOf(n)===i; }).map(function(n) {',
     '    return "try{window[" + JSON.stringify(n) + "]=" + n + ";}catch(_e){}";',
     '  }).join("\\n");',
     '}',
-
-    // Main message handler
+    '',
     'window.addEventListener("message", function(e) {',
     '  if (!e.data || e.data.type !== "EXEC") return;',
     '  var id = e.data.id, src = e.source, code = e.data.code;',
@@ -961,8 +958,7 @@ window.fetch = async function(url, opts={}){
     '       .catch(function(err){ sendError(id, src, err); });',
     '  } catch(err) { sendError(id, src, err); }',
     '});',
-
-    // Console proxy — forward all console calls to parent via postMessage
+    '',
     '["log","warn","error","info","table","dir","trace","group","groupEnd","time","timeEnd","count","assert","clear"]',
     '.forEach(function(m) {',
     '  (function(method, native) {',
@@ -976,23 +972,15 @@ window.fetch = async function(url, opts={}){
     '    };',
     '  })(m, console[m]);',
     '});',
-
+    '',
     'window.parent.postMessage({ type: "SANDBOX_READY" }, "*");',
-    '<' + '/script>
-<script>
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', function() {
-    navigator.serviceWorker.register('sw.js')
-      .then(function(reg) { console.info('SW registered:', reg.scope); })
-      .catch(function(err) { console.warn('SW registration failed:', err); });
-  });
-}
-</script>
-</body></html>'
-  ].join('\n');
+    SC,
+    '</body></html>'
+  ];
 
-  var blob = new Blob([sandboxScript], { type: 'text/html' });
-  var url  = URL.createObjectURL(blob);
+  var html  = sandboxLines.join('\n');
+  var blob  = new Blob([html], { type: 'text/html' });
+  var url   = URL.createObjectURL(blob);
   var frame = document.createElement('iframe');
   frame.style.display = 'none';
   frame.sandbox = 'allow-scripts allow-same-origin';
@@ -1959,6 +1947,16 @@ window.addEventListener('load', ()=>{
     '<span style="color:var(--text)">Application</span> (localStorage / cookies)', '');
   consoleInput.focus();
 });
+</script>
+
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', function() {
+    navigator.serviceWorker.register('sw.js')
+      .then(function(reg) { console.info('SW registered:', reg.scope); })
+      .catch(function(err) { console.warn('SW registration failed:', err); });
+  });
+}
 </script>
 </body>
 </html>

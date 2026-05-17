@@ -1867,7 +1867,6 @@ function showStyles(node){
     var t0 = performance.now();
 
     // Build iframe HTML as Blob — same technique as the sandbox frame.
-    // Split </script> across two strings so HTML parser never sees it.
     var SC = '</scr'+'ipt>';
     var reactLines = [
       '<!DOCTYPE html><html><head><meta charset="UTF-8">',
@@ -2347,10 +2346,9 @@ window.addEventListener('load', ()=>{
 
 <div id="acBox"></div>
 <script>
-if ('serviceWorker' in navigator) {
+if ('serviceWorker' in navigator && location.hostname !== 'claudeusercontent.com') {
   window.addEventListener('load', function() {
     navigator.serviceWorker.register('sw.js')
-      .then(function(reg) { console.info('SW registered:', reg.scope); })
       .catch(function(err) { console.warn('SW registration failed:', err); });
   });
 }

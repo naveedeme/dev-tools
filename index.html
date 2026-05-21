@@ -1777,8 +1777,6 @@ document.getElementById('btnRun').addEventListener('click', ()=>{
       e.preventDefault(); e.stopPropagation();
       resetNumberShortcut();
       apply(input, list[cur >= 0 ? cur : 0], {chain:true});
-    } else if (open && e.key === 'ArrowRight') {
-      e.preventDefault(); e.stopPropagation(); resetNumberShortcut(); apply(input, list[cur >= 0 ? cur : 0], {chain:true});
     } else if (open && e.key === 'ArrowDown') {
       e.preventDefault(); e.stopPropagation(); resetNumberShortcut(); setActive(Math.min(cur+1, list.length-1));
     } else if (open && e.key === 'ArrowUp') {
@@ -1786,7 +1784,7 @@ document.getElementById('btnRun').addEventListener('click', ()=>{
     } else if (open && e.key === 'Escape') {
       e.preventDefault(); e.stopPropagation(); hide();
     } else if (open && e.key === 'Enter') {
-      e.preventDefault(); e.stopPropagation(); resetNumberShortcut(); apply(input, list[cur >= 0 ? cur : 0], {chain:false});
+      e.preventDefault(); e.stopPropagation(); resetNumberShortcut(); apply(input, list[cur >= 0 ? cur : 0], {chain:true});
     }
     }, true);
 

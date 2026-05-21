@@ -518,7 +518,7 @@ canvas#flameCanvas { display: block; width: 100%; }
 .ack-class { background:#dcdcaa; color:#1e1e1e; }
 .ack-snip  { background:#6a9955; color:#fff;    }
 .ack-prop  { background:#dcdcaa; color:#1e1e1e; }
-.ac-num { color:#777; font-size:11px; min-width:12px; text-align:right; flex-shrink:0; }
+.ac-num { color:#777; font-size:11px; min-width:24px; text-align:right; flex-shrink:0; }
 .aci.on .ac-num, .aci:hover .ac-num { color:#cfe9ff; }
 .acn { flex:1; overflow:hidden; text-overflow:ellipsis; }
 .acn b { color:#4fc1ff; font-weight:normal; }
@@ -1188,6 +1188,8 @@ document.getElementById('btnRun').addEventListener('click', ()=>{
   var list  = [];
   var cur   = -1;
   var suppressInput = 0;
+  var numBuffer = '';
+  var numTimer = null;
   function getBox(){ if(!box) box = document.getElementById('acBox'); return box; }
 
   /* completion sources */
@@ -1560,8 +1562,7 @@ document.getElementById('btnRun').addEventListener('click', ()=>{
     var html = '';
     items.forEach(function(item, i) {
       html += '<div class="aci" data-i="'+i+'">';
-      if (i < 9) html += '<span class="ac-num">'+(i+1)+'</span>';
-      else html += '<span class="ac-num"></span>';
+      html += '<span class="ac-num">'+(i+1)+'</span>';
       html += '<span class="'+kindCls(item.k)+'">'+kindLbl(item.k)+'</span>';
       html += '<span class="acn">'+hlText(item.n, pfx)+'</span>';
       if (item.d) html += '<span class="acd">'+item.d+'</span>';
@@ -1578,9 +1579,22 @@ document.getElementById('btnRun').addEventListener('click', ()=>{
     getBox().style.display = 'block';
   }
 
-  function hide() { getBox().style.display='none'; list=[]; cur=-1; activeInput=null; }
+  function resetNumberShortcut() {
+    numBuffer = '';
+    clearTimeout(numTimer);
+    numTimer = null;
+  }
+
+  function hide() {
+    getBox().style.display='none';
+    list=[];
+    cur=-1;
+    activeInput=null;
+    resetNumberShortcut();
+  }
 
   function setActive(idx) {
+    if (idx < 0 || idx >= list.length) return;
     cur = idx;
     getBox().querySelectorAll('.aci').forEach(function(el, i) {
       el.classList.toggle('on', i===idx);
@@ -1708,19 +1722,38 @@ document.getElementById('btnRun').addEventListener('click', ()=>{
     return true;
   }
 
+  function handleNumberShortcut(e) {
+    if (!/^[0-9]$/.test(e.key)) return false;
+    e.preventDefault();
+    e.stopPropagation();
+    clearTimeout(numTimer);
+
+    var next = numBuffer + e.key;
+    var n = Number(next);
+    if (next.charAt(0) !== '0' && n >= 1 && n <= list.length) {
+      numBuffer = next;
+      setActive(n - 1);
+    } else {
+      n = Number(e.key);
+      if (e.key !== '0' && n >= 1 && n <= list.length) {
+        numBuffer = e.key;
+        setActive(n - 1);
+      } else {
+        numBuffer = '';
+      }
+    }
+
+    numTimer = setTimeout(resetNumberShortcut, 800);
+    return true;
+  }
+
   function install(input) {
     if (!input) return;
     input.addEventListener('input', function(){ refresh(input); });
     input.addEventListener('click', function(){ if (activeInput === input) refresh(input); });
     input.addEventListener('keydown', function(e) {
     var open = getBox().style.display !== 'none' && activeInput === input;
-    if (open && /^[1-9]$/.test(e.key)) {
-      var idx = Number(e.key) - 1;
-      if (idx < list.length) {
-        e.preventDefault(); e.stopPropagation();
-        setActive(idx); return;
-      }
-    }
+    if (open && handleNumberShortcut(e)) return;
     if (handlePairedKey(input, e)) { hide(); e.stopPropagation(); return; }
     if (e.key === 'Tab') {
       if (!open) {
@@ -1740,15 +1773,16 @@ document.getElementById('btnRun').addEventListener('click', ()=>{
         return;
       }
       e.preventDefault(); e.stopPropagation();
+      resetNumberShortcut();
       apply(input, list[cur >= 0 ? cur : 0]);
     } else if (open && e.key === 'ArrowDown') {
-      e.preventDefault(); e.stopPropagation(); setActive(Math.min(cur+1, list.length-1));
+      e.preventDefault(); e.stopPropagation(); resetNumberShortcut(); setActive(Math.min(cur+1, list.length-1));
     } else if (open && e.key === 'ArrowUp') {
-      e.preventDefault(); e.stopPropagation(); if (cur <= 0) hide(); else setActive(cur-1);
+      e.preventDefault(); e.stopPropagation(); resetNumberShortcut(); if (cur <= 0) hide(); else setActive(cur-1);
     } else if (open && e.key === 'Escape') {
       e.preventDefault(); e.stopPropagation(); hide();
     } else if (open && e.key === 'Enter') {
-      e.preventDefault(); e.stopPropagation(); apply(input, list[cur >= 0 ? cur : 0]);
+      e.preventDefault(); e.stopPropagation(); resetNumberShortcut(); apply(input, list[cur >= 0 ? cur : 0]);
     }
     }, true);
 

@@ -515,6 +515,7 @@ canvas#flameCanvas { display: block; width: 100%; }
 .ack-fn    { background:#c586c0; color:#1e1e1e; }
 .ack-kw    { background:#569cd6; color:#fff;    }
 .ack-const { background:#4ec9b0; color:#1e1e1e; }
+.ack-class { background:#dcdcaa; color:#1e1e1e; }
 .ack-snip  { background:#6a9955; color:#fff;    }
 .ack-prop  { background:#dcdcaa; color:#1e1e1e; }
 .acn { flex:1; overflow:hidden; text-overflow:ellipsis; }
@@ -1223,6 +1224,21 @@ document.getElementById('btnRun').addEventListener('click', ()=>{
     {n:'map JSX', v:'items.map(item => (\n  <div key={item.id}>{item.name}</div>\n))'},
     {n:'event handler', v:'const handleClick = () => {\n  \n};'}
   ];
+  var COMMON_CALLS = {
+    log:95, map:92, filter:88, forEach:86, reduce:82, find:78, includes:74,
+    then:72, catch:70, finally:54, push:68, pop:36, slice:62, splice:44,
+    sort:58, join:56, split:56, trim:54, replace:52, match:42, test:40,
+    keys:64, values:60, entries:58, assign:38, stringify:66, parse:64,
+    addEventListener:62, removeEventListener:34, querySelector:58,
+    querySelectorAll:54, getElementById:50, createElement:46,
+    setState:48, useState:88, useEffect:84, useMemo:68, useCallback:62,
+    useRef:58, useReducer:42, preventDefault:56, stopPropagation:42,
+    warn:48, error:52, info:34, table:40
+  };
+  var GENERIC_METHODS = 'map filter reduce forEach find findIndex some every includes indexOf push pop shift unshift slice splice sort reverse join split trim replace match test startsWith endsWith toLowerCase toUpperCase then catch finally'.split(' ');
+  var JS_KEYWORDS = {};
+  KW.concat('import export default from as get set static extends super yield void debugger'.split(' '))
+    .forEach(function(k){ JS_KEYWORDS[k] = 1; });
 
   function safeType(obj, key) {
     try { return typeof obj[key]; } catch(e) { return ''; }
@@ -1235,16 +1251,16 @@ document.getElementById('btnRun').addEventListener('click', ()=>{
       var proto = obj;
       while (proto != null) {
         Object.getOwnPropertyNames(proto).forEach(function(k) {
-          if (!seen[k] && k.indexOf(pfx) === 0) {
+          if (!seen[k] && k.toLowerCase().indexOf(pfx.toLowerCase()) === 0) {
             seen[k] = 1;
-            out.push({n:k, k: safeType(obj,k)==='function' ? 'fn' : 'prop', d: safeType(obj,k)});
+            out.push({n:k, k: safeType(obj,k)==='function' ? 'fn' : 'prop', d: safeType(obj,k), score: COMMON_CALLS[k] || 0});
           }
         });
         proto = Object.getPrototypeOf(proto);
         if (proto === Object.prototype) break;
       }
     } catch(e) {}
-    return out.slice(0, 30);
+    return out.sort(compareItems).slice(0, 50);
   }
 
   function sandboxVars() {
@@ -1259,7 +1275,7 @@ document.getElementById('btnRun').addEventListener('click', ()=>{
   }
 
   function getCtx(text) {
-    var dot  = text.match(/([a-zA-Z_$][a-zA-Z0-9_$]*)\.([a-zA-Z_$]*)$/);
+    var dot  = text.match(/([a-zA-Z_$][a-zA-Z0-9_$]*(?:\.[a-zA-Z_$][a-zA-Z0-9_$]*)*)\.([a-zA-Z_$]*)$/);
     var word = text.match(/([a-zA-Z_$][a-zA-Z0-9_$]*)$/);
     if (dot)  return {type:'member', obj:dot[1],  pfx:dot[2]};
     if (word) return {type:'global', pfx:word[1]};
@@ -1286,66 +1302,192 @@ document.getElementById('btnRun').addEventListener('click', ()=>{
     return out;
   }
 
+  function compareItems(a, b) {
+    return (b.score || 0) - (a.score || 0)
+      || (a.order || 0) - (b.order || 0)
+      || String(a.n).localeCompare(String(b.n));
+  }
+
+  function stripCode(code) {
+    return String(code || '')
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .replace(/\/\/.*$/gm, ' ')
+      .replace(/(['"`])(?:\\[\s\S]|(?!\1)[\s\S])*?\1/g, ' ');
+  }
+
+  function sourceSnippets(input, before) {
+    var out = [];
+    var activeId = null;
+    try {
+      if (typeof window.__getSourceSnippets === 'function') {
+        out = window.__getSourceSnippets() || [];
+        out.forEach(function(s){ if (s && s.active) activeId = s.id; });
+      }
+    } catch(e) { out = []; }
+    if (input && input.id === 'codeArea') {
+      if (!out.length) out.push({ id:'current', name:'current snippet', active:true, code:before || input.value });
+      out = out.map(function(s){
+        if (s && (s.active || s.id === activeId)) {
+          return { id:s.id, name:s.name, mode:s.mode, active:true, code:before || '' };
+        }
+        return s;
+      });
+    }
+    return out;
+  }
+
+  function addCount(map, name, kind, detail, score, order) {
+    if (!name || JS_KEYWORDS[name]) return;
+    var key = name + '|' + kind;
+    var item = map[key] || (map[key] = {
+      n:name, k:kind, d:detail || '', score:0, order:order
+    });
+    item.score += score || 1;
+    if (item.order == null || (order || 0) < item.order) item.order = order || 0;
+    if (kind === 'fn' && item.k !== 'fn') item.k = 'fn';
+  }
+
+  function analyzeSources(input, before) {
+    var symbols = {}, members = {};
+    sourceSnippets(input, before).forEach(function(snippet, snippetIndex){
+      var raw = snippet && snippet.code || '';
+      var code = stripCode(raw);
+      var base = snippet && snippet.active ? 260 : Math.max(20, 120 - snippetIndex * 8);
+      var orderBase = snippetIndex * 10000;
+      var m;
+      var decl = /(?:^|[\n;{])\s*(const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*)/g;
+      while ((m = decl.exec(code))) addCount(symbols, m[2], 'const', snippet && snippet.active ? 'current' : 'snippet', base + 35, orderBase + m.index);
+      var fn = /(?:^|[\n;{])\s*(?:async\s+)?function\s+([a-zA-Z_$][a-zA-Z0-9_$]*)|(?:^|[\n;{])\s*class\s+([a-zA-Z_$][a-zA-Z0-9_$]*)/g;
+      while ((m = fn.exec(code))) addCount(symbols, m[1] || m[2], m[1] ? 'fn' : 'class', snippet && snippet.active ? 'current' : 'snippet', base + 55, orderBase + m.index);
+      var assignedFn = /(?:const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=\s*(?:async\s*)?(?:\([^)]*\)|[a-zA-Z_$][a-zA-Z0-9_$]*)\s*=>/g;
+      while ((m = assignedFn.exec(code))) addCount(symbols, m[1], 'fn', snippet && snippet.active ? 'current' : 'snippet', base + 55, orderBase + m.index);
+      var memberCall = /([a-zA-Z_$][a-zA-Z0-9_$]*(?:\.[a-zA-Z_$][a-zA-Z0-9_$]*)*)\.([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g;
+      while ((m = memberCall.exec(code))) {
+        var obj = m[1], method = m[2];
+        if (!members[obj]) members[obj] = {};
+        addCount(members[obj], method, 'fn', obj, base + 45 + (COMMON_CALLS[method] || 0), orderBase + m.index);
+        addCount(symbols, method, 'fn', 'used method', Math.floor(base / 3) + (COMMON_CALLS[method] || 0), orderBase + m.index);
+      }
+      var memberProp = /([a-zA-Z_$][a-zA-Z0-9_$]*(?:\.[a-zA-Z_$][a-zA-Z0-9_$]*)*)\.([a-zA-Z_$][a-zA-Z0-9_$]*)/g;
+      while ((m = memberProp.exec(code))) {
+        if (!members[m[1]]) members[m[1]] = {};
+        addCount(members[m[1]], m[2], 'prop', m[1], Math.floor(base / 2), orderBase + m.index);
+      }
+      var call = /(?:^|[^\.\w$])([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g;
+      while ((m = call.exec(code))) addCount(symbols, m[1], 'fn', 'used function', base + 25 + (COMMON_CALLS[m[1]] || 0), orderBase + m.index);
+    });
+    return { symbols:symbols, members:members };
+  }
+
+  function resolvePathObject(pathName, before) {
+    if (!pathName) return null;
+    try {
+      var parts = pathName.split('.');
+      var fw = window.__sandboxFrame && window.__sandboxFrame.contentWindow;
+      var obj = fw && fw[parts[0]] !== undefined ? fw[parts[0]] : window[parts[0]];
+      for (var i=1; obj != null && i<parts.length; i++) obj = obj[parts[i]];
+      if (obj != null) return obj;
+    } catch(e) {}
+    if (before && /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(pathName)) {
+      var name = pathName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      var re = new RegExp('(?:const|let|var)\\s+'+name+'\\s*=\\s*([^;\\n]+)', 'g');
+      var m, val = '';
+      while ((m = re.exec(before))) val = m[1].trim();
+      if (/^\[/.test(val)) return [];
+      if (/^\{/.test(val)) return {};
+      if (/^['"`]/.test(val)) return '';
+      if (/^new\s+Map\b/.test(val)) return new Map();
+      if (/^new\s+Set\b/.test(val)) return new Set();
+      if (/^new\s+Date\b/.test(val)) return new Date();
+    }
+    return null;
+  }
+
+  function rankedAddFactory(pfx) {
+    var results = [], seen = {};
+    return {
+      add:function(item) {
+        if (!item || !item.n) return;
+        var n = item.n;
+        if (pfx && n.toLowerCase().indexOf(pfx.toLowerCase()) !== 0) return;
+        if (!pfx && item.hideWhenEmpty) return;
+        var key = n;
+        if (seen[key]) {
+          seen[key].score = Math.max(seen[key].score || 0, item.score || 0);
+          if (item.k === 'fn') seen[key].k = 'fn';
+          if (item.d && !seen[key].d) seen[key].d = item.d;
+          return;
+        }
+        item.score = (item.score || 0) + (COMMON_CALLS[n] || 0);
+        item.order = item.order || results.length;
+        seen[key] = item;
+        results.push(item);
+      },
+      list:function(){ return results.sort(compareItems).slice(0, 80); }
+    };
+  }
+
   function completions(before, input) {
     var ctx = getCtx(before);
     if (!ctx) return [];
     var mode = inputMode(input);
+    var corpus = analyzeSources(input, before);
 
     /* member access */
     if (ctx.type === 'member') {
-      var fw = window.__sandboxFrame && window.__sandboxFrame.contentWindow;
-      var obj;
-      try { obj = fw && fw[ctx.obj] !== undefined ? fw[ctx.obj] : window[ctx.obj]; } catch(e) { obj = window[ctx.obj]; }
+      var memberRank = rankedAddFactory(ctx.pfx);
+      var known = corpus.members[ctx.obj];
+      if (known) Object.keys(known).forEach(function(k){ memberRank.add(known[k]); });
       if (ctx.obj === 'console') {
-        return CONSOLE_PROPS.filter(function(p){ return p.indexOf(ctx.pfx)===0; })
-          .map(function(p){ return {n:p, k:'fn', d:'console'}; });
+        CONSOLE_PROPS.forEach(function(p, i){ memberRank.add({n:p, k:'fn', d:'console', score:220 + (COMMON_CALLS[p] || 0), order:i}); });
       }
       if (ctx.obj === 'React') {
-        return REACT_PROPS.filter(function(p){ return p.toLowerCase().indexOf(ctx.pfx.toLowerCase())===0; })
-          .map(function(p){ return {n:p, k:'fn', d:'React'}; });
+        REACT_PROPS.forEach(function(p, i){ memberRank.add({n:p, k:'fn', d:'React', score:210 + (COMMON_CALLS[p] || 0), order:i}); });
       }
-      if (obj == null) return [];
-      return getObjProps(obj, ctx.pfx);
+      var obj = resolvePathObject(ctx.obj, before);
+      if (obj != null) {
+        getObjProps(obj, ctx.pfx).forEach(function(item){ memberRank.add(item); });
+      } else if (!known && ctx.obj !== 'console' && ctx.obj !== 'React') {
+        GENERIC_METHODS.forEach(function(p, i){ memberRank.add({n:p, k:'fn', d:'method', score:COMMON_CALLS[p] || 20, order:5000+i}); });
+      }
+      return memberRank.list();
     }
 
     /* global */
     var pfx = ctx.pfx;
     if (pfx.length < 1) return [];
-    var results = [];
-    var seen = {};
-    function add(n, k, d) {
-      if (!seen[n] && n.indexOf(pfx)===0 && n !== pfx) { seen[n]=1; results.push({n:n,k:k,d:d||''}); }
-    }
+    var rank = rankedAddFactory(pfx);
 
-    if (input && input.value) {
-      declaredNames(input.value).forEach(function(n){ add(n, 'const', 'local'); });
-    }
+    Object.keys(corpus.symbols).forEach(function(key){ rank.add(corpus.symbols[key]); });
 
     /* sandbox vars first */
-    sandboxVars().forEach(function(v){ add(v.n, v.k, v.d); });
+    sandboxVars().forEach(function(v){ v.score = 150; rank.add(v); });
 
     /* history-declared names */
     State.cmdHistory.forEach(function(h) {
       var m = h.match(/^(?:const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*)/);
-      if (m) add(m[1], 'const', 'declared');
+      if (m) rank.add({n:m[1], k:'const', d:'declared', score:130});
     });
 
-    KW.forEach(function(k){ add(k,'kw',''); });
-    GLOBALS.forEach(function(g){ add(g,'const',''); });
-    if (mode === 'react') add('React', 'const', 'react');
+    KW.forEach(function(k, i){ rank.add({n:k, k:'kw', d:'', score:15, order:8000+i}); });
+    GLOBALS.forEach(function(g, i){
+      var isFn = /^(fetch|setTimeout|clearTimeout|setInterval|clearInterval|requestAnimationFrame|parseInt|parseFloat|isNaN|isFinite|encodeURIComponent|decodeURIComponent|atob|btoa)$/.test(g);
+      rank.add({n:g, k:isFn ? 'fn' : 'const', d:isFn ? 'global' : '', score:COMMON_CALLS[g] || 25, order:9000+i});
+    });
+    if (mode === 'react') rank.add({n:'React', k:'const', d:'react', score:210});
 
     SNIPS.concat(mode === 'react' ? REACT_SNIPS : []).filter(function(s){ return s.n.toLowerCase().indexOf(pfx.toLowerCase())===0; })
-      .forEach(function(s){ results.push({n:s.n, k:'snip', d:'snippet', v:s.v}); });
+      .forEach(function(s, i){ rank.add({n:s.n, k:'snip', d:'snippet', v:s.v, score:120 + (COMMON_CALLS[s.n] || 0), order:7000+i}); });
 
-    return results.slice(0, 50);
+    return rank.list();
   }
 
   /* rendering */
   function kindCls(k) {
-    return 'ack ack-'+({'fn':'fn','kw':'kw','const':'const','snip':'snip','prop':'prop'}[k]||'prop');
+    return 'ack ack-'+({'fn':'fn','kw':'kw','const':'const','class':'class','snip':'snip','prop':'prop'}[k]||'prop');
   }
   function kindLbl(k) {
-    return {'fn':'f()','kw':'kw','const':'c','snip':'{}','prop':'p'}[k]||'p';
+    return {'fn':'f()','kw':'kw','const':'c','class':'C','snip':'{}','prop':'p'}[k]||'p';
   }
   function hlText(text, pfx) {
     if (!pfx) return text;
@@ -1446,6 +1588,7 @@ document.getElementById('btnRun').addEventListener('click', ()=>{
     var ctx    = getCtx(val.slice(0, pos));
     if (!ctx) { hide(); return; }
     var insert = item.v || item.n;
+    if (!item.v && item.k === 'fn' && insert.indexOf('(') === -1) insert += '()';
     var pfxLen = ctx.pfx.length;
     if (ctx.type === 'global' && item.n.indexOf('.')!==-1) {
       /* full dotted name like console.log — replace from word start */
@@ -1472,7 +1615,7 @@ document.getElementById('btnRun').addEventListener('click', ()=>{
     if (suppressInput) return;
     var before = input.value.slice(0, input.selectionStart);
     var ctx = getCtx(before);
-    if (!ctx || ctx.pfx.length < 1) { hide(); return; }
+    if (!ctx || (ctx.type === 'global' && ctx.pfx.length < 1)) { hide(); return; }
     render(input, completions(before, input), ctx.pfx);
   }
 
@@ -1486,7 +1629,7 @@ document.getElementById('btnRun').addEventListener('click', ()=>{
       if (!open) {
         var before = input.value.slice(0, input.selectionStart);
         var ctx = getCtx(before);
-        if (ctx && ctx.pfx.length >= 1) {
+        if (ctx && (ctx.type === 'member' || ctx.pfx.length >= 1)) {
           var items = completions(before, input);
           if (items.length === 1) {
             e.preventDefault(); e.stopPropagation();
@@ -1777,6 +1920,17 @@ function showStyles(node){
     clearTimeout(saveTimer);
     saveTimer = setTimeout(saveAll, 180);
   }
+  window.__getSourceSnippets = function(){
+    return snippets.map(function(s){
+      return {
+        id:s.id,
+        name:s.name,
+        mode:s.mode,
+        active:s.id === activeId,
+        code:s.id === activeId ? codeArea.value : s.code
+      };
+    });
+  };
   save();
 
   /* Sidebar */
@@ -1952,6 +2106,36 @@ function showStyles(node){
   }
   codeArea.addEventListener('input', function(){ syncLineNums(); queueSave(); });
   codeArea.addEventListener('scroll', function(){ codeLineNums.scrollTop=codeArea.scrollTop; });
+  function shouldAutoSemicolon(line){
+    var t = line.trim();
+    if(!t || /^(\/\/|\/\*)/.test(t)) return false;
+    if(/[;,{:[(]$/.test(t)) return false;
+    if(/[+\-*\/%=&|^!?:.]$/.test(t)) return false;
+    if(/=>\s*$/.test(t)) return false;
+    if(/^(if|for|while|switch|catch|with|function|class|else|try|finally|do)\b/.test(t)) return false;
+    if(/^[<][^>]*>?$/.test(t) || /^<\/?[A-Za-z]/.test(t) || /<\/[A-Za-z][^>]*>$/.test(t)) return false;
+    if(/^(const|let|var)\b/.test(t)) return /=/.test(t) && !/[({\[]\s*$/.test(t);
+    if(/^(return|throw|break|continue)\b/.test(t)) return !/[({\[]\s*$/.test(t);
+    if(/\)\s*$/.test(t)) return true;
+    if(/\]\s*$/.test(t)) return true;
+    if(/(['"`]|\d|true|false|null|undefined)\s*$/.test(t)) return true;
+    if(/^[a-zA-Z_$][a-zA-Z0-9_$]*(?:\.[a-zA-Z_$][a-zA-Z0-9_$]*)*(?:\+\+|--)$/.test(t)) return true;
+    return false;
+  }
+  function insertAutoSemicolonBeforeEnter(){
+    var pos = codeArea.selectionStart;
+    if(pos !== codeArea.selectionEnd) return false;
+    var before = codeArea.value.slice(0, pos);
+    var after = codeArea.value.slice(pos);
+    var lineStart = before.lastIndexOf('\n') + 1;
+    var line = before.slice(lineStart);
+    if(!shouldAutoSemicolon(line)) return false;
+    codeArea.value = before + ';\n' + after;
+    codeArea.selectionStart = codeArea.selectionEnd = pos + 2;
+    syncLineNums();
+    queueSave();
+    return true;
+  }
   codeArea.addEventListener('keydown', function(e){
     if(e.defaultPrevented) return;
     if(e.key==='Tab'){
@@ -1960,6 +2144,9 @@ function showStyles(node){
       codeArea.value=codeArea.value.slice(0,s)+'  '+codeArea.value.slice(codeArea.selectionEnd);
       codeArea.selectionStart=codeArea.selectionEnd=s+2;
       syncLineNums();
+    }
+    if(e.key==='Enter' && !e.ctrlKey && !e.metaKey && !e.shiftKey && insertAutoSemicolonBeforeEnter()){
+      e.preventDefault();
     }
     if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){ e.preventDefault(); runSnippet(); }
   });

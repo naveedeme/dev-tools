@@ -31,8 +31,36 @@
   --orange:  #ce9178;
   --purple:  #c586c0;
   --accent:  #007acc;
+  --tab-bg:  #2b2b2c;
+  --ac-bg:   #252526;
+  --ac-active:#094771;
+  --ac-shadow:rgba(0,0,0,.6);
+  --sel-bg:  rgba(38,79,120,.72);
   --tab-h:   35px;
   --toolbar-h: 28px;
+}
+body.light-theme {
+  --bg:      #ffffff;
+  --bg2:     #f6f8fa;
+  --bg3:     #eef1f4;
+  --bg4:     #e2e6ea;
+  --border:  #d0d7de;
+  --text:    #1f2328;
+  --text2:   #57606a;
+  --blue:    #0969da;
+  --blue2:   #0550ae;
+  --yellow:  #795e26;
+  --green:   #116329;
+  --green2:  #008000;
+  --red:     #cf222e;
+  --orange:  #a31515;
+  --purple:  #8250df;
+  --accent:  #0969da;
+  --tab-bg:  #f6f8fa;
+  --ac-bg:   #ffffff;
+  --ac-active:#dbeafe;
+  --ac-shadow:rgba(31,35,40,.18);
+  --sel-bg:  rgba(9,105,218,.22);
 }
 html, body {
   height: 100%; width: 100%;
@@ -47,7 +75,7 @@ html, body {
 
 /* ── Top Tab Bar ───────────────────────────────────────────── */
 #tabBar {
-  background: #2b2b2c;
+  background: var(--tab-bg);
   border-bottom: 1px solid var(--border);
   display: flex;
   align-items: stretch;
@@ -76,6 +104,7 @@ html, body {
 .tab.active { color: var(--text); border-bottom-color: var(--accent); }
 #tabSpacer { flex: 1; }
 .tab-icon { font-size: 15px; padding: 0 9px; }
+#themeToggle { font-size: 14px; min-width: 36px; justify-content: center; }
 
 /* ── Panel Container ───────────────────────────────────────── */
 #panels { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
@@ -278,7 +307,7 @@ table.ctable tr:hover td { background: rgba(255,255,255,0.03); }
 .file-item:hover .fi-del { display: block; }
 .fi-del:hover { color: var(--red); }
 .fi-icon { font-size: 11px; flex-shrink: 0; opacity: .75; }
-#codeEditor { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+#codeEditor { flex: 1; display: flex; flex-direction: column; min-width: 0; position: relative; }
 #codeToolbar {
   background: var(--bg2); border-bottom: 1px solid var(--border);
   height: 32px; display: flex; align-items: center;
@@ -301,11 +330,12 @@ table.ctable tr:hover td { background: rgba(255,255,255,0.03); }
   padding: 3px 14px; font-size: 12px; cursor: pointer; margin-left: auto; font-family: sans-serif;
 }
 #runSnippetBtn:hover { background: #0086d4; }
-#clearOutputBtn, #btnImportFile {
+#clearOutputBtn, #btnImportFile, #fnPaletteToggle {
   background: none; border: 1px solid var(--border); color: var(--text2);
   font-family: sans-serif; font-size: 11px; padding: 2px 10px; border-radius: 3px; cursor: pointer;
 }
-#clearOutputBtn:hover, #btnImportFile:hover { color: var(--text); }
+#clearOutputBtn:hover, #btnImportFile:hover, #fnPaletteToggle:hover { color: var(--text); }
+#fnPaletteToggle.on { color: var(--blue); border-color: var(--accent); background: rgba(0,122,204,.12); }
 #codeEditorBody { flex: 1; display: flex; overflow: hidden; background: var(--bg); min-height: 0; }
 #codeLineNums {
   background: var(--bg2); color: var(--text2);
@@ -332,7 +362,7 @@ table.ctable tr:hover td { background: rgba(255,255,255,0.03); }
   background: transparent; color: transparent; caret-color: #fff;
   z-index: 1; -webkit-text-fill-color: transparent;
 }
-#codeArea::selection { background: rgba(38,79,120,.72); }
+#codeArea::selection { background: var(--sel-bg); }
 .tok-kw { color: #569cd6; }
 .tok-fn { color: #dcdcaa; }
 .tok-str { color: #ce9178; }
@@ -342,6 +372,41 @@ table.ctable tr:hover td { background: rgba(255,255,255,0.03); }
 .tok-tag { color: #569cd6; }
 .tok-attr { color: #9cdcfe; }
 .tok-punc { color: #808080; }
+body.light-theme .tok-kw { color: #0000ff; }
+body.light-theme .tok-fn { color: #795e26; }
+body.light-theme .tok-str { color: #a31515; }
+body.light-theme .tok-num { color: #098658; }
+body.light-theme .tok-bool, body.light-theme .tok-null { color: #0000ff; }
+body.light-theme .tok-cmt { color: #008000; }
+body.light-theme .tok-tag { color: #800000; }
+body.light-theme .tok-attr { color: #e50000; }
+body.light-theme .tok-punc { color: #444; }
+#fnPalette {
+  position: absolute; top: 32px; right: 0; bottom: 0; width: 220px;
+  background: var(--bg2); border-left: 1px solid var(--border);
+  box-shadow: -10px 0 24px rgba(0,0,0,.22);
+  transform: translateX(100%); transition: transform .18s ease;
+  z-index: 4; display: flex; flex-direction: column; font-family: sans-serif;
+}
+#fnPalette.open { transform: translateX(0); }
+.fn-pal-head {
+  height: 30px; display: flex; align-items: center; gap: 6px;
+  padding: 0 8px; border-bottom: 1px solid var(--border);
+  color: var(--text2); font-size: 11px; text-transform: uppercase; letter-spacing:.05em;
+}
+.fn-pal-head button {
+  margin-left: auto; background: none; border: none; color: var(--text2);
+  cursor: pointer; font-size: 16px; line-height: 1; border-radius: 3px; padding: 1px 5px;
+}
+.fn-pal-head button:hover { background: rgba(127,127,127,.14); color: var(--text); }
+#fnPaletteList { overflow-y: auto; padding: 6px; display: flex; flex-direction: column; gap: 3px; }
+.fn-pal-item {
+  border: 1px solid transparent; background: transparent; color: var(--text);
+  text-align: left; font-family: 'Consolas','Courier New',monospace; font-size: 12px;
+  padding: 5px 7px; border-radius: 4px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.fn-pal-item:hover { background: var(--bg3); border-color: var(--border); }
+.fn-pal-item:first-child { color: var(--blue); font-weight: 700; }
 #outputPaneResizer {
   height: 5px; background: transparent; cursor: ns-resize; flex-shrink: 0;
   border-top: 1px solid var(--border);
@@ -523,14 +588,14 @@ canvas#flameCanvas { display: block; width: 100%; }
 /* ── Autocomplete ───────────────────────────────────────────────────────── */
 #acBox {
   position:fixed; display:none; z-index:9999;
-  background:#252526; border:1px solid #007acc; border-radius:4px;
-  box-shadow:0 4px 20px rgba(0,0,0,.6);
+  background:var(--ac-bg); border:1px solid var(--accent); border-radius:4px;
+  box-shadow:0 4px 20px var(--ac-shadow);
   max-height:220px; overflow-y:auto;
   min-width:240px; max-width:440px;
   font-family:'Consolas','Courier New',monospace; font-size:12px;
 }
-.aci { display:flex; align-items:center; gap:8px; padding:4px 10px; cursor:pointer; color:#cccccc; border-bottom:1px solid rgba(255,255,255,.04); white-space:nowrap; }
-.aci:hover,.aci.on { background:#094771; color:#fff; }
+.aci { display:flex; align-items:center; gap:8px; padding:4px 10px; cursor:pointer; color:var(--text); border-bottom:1px solid rgba(127,127,127,.12); white-space:nowrap; }
+.aci:hover,.aci.on { background:var(--ac-active); color:var(--text); }
 .ack { font-size:10px; padding:1px 5px; border-radius:3px; flex-shrink:0; font-family:sans-serif; font-weight:700; }
 .ack-fn    { background:#c586c0; color:#1e1e1e; }
 .ack-kw    { background:#569cd6; color:#fff;    }
@@ -539,10 +604,10 @@ canvas#flameCanvas { display: block; width: 100%; }
 .ack-snip  { background:#6a9955; color:#fff;    }
 .ack-prop  { background:#dcdcaa; color:#1e1e1e; }
 .ac-num { color:#777; font-size:11px; min-width:24px; text-align:right; flex-shrink:0; }
-.aci.on .ac-num, .aci:hover .ac-num { color:#cfe9ff; }
+.aci.on .ac-num, .aci:hover .ac-num { color:var(--blue); }
 .acn { flex:1; overflow:hidden; text-overflow:ellipsis; }
 .acn b { color:#4fc1ff; font-weight:normal; }
-.acd { color:#777; font-size:11px; flex-shrink:0; }
+.acd { color:var(--text2); font-size:11px; flex-shrink:0; }
 </style>
 </head>
 <body>
@@ -566,6 +631,7 @@ canvas#flameCanvas { display: block; width: 100%; }
   <div class="tab" data-panel="performance">Performance</div>
   <div class="tab" data-panel="application">Application</div>
   <div id="tabSpacer"></div>
+  <div class="tab tab-icon" id="themeToggle" title="Toggle light theme">☀</div>
   <div class="tab tab-icon" title="Settings">⚙</div>
 </div>
 
@@ -634,6 +700,7 @@ canvas#flameCanvas { display: block; width: 100%; }
           <button class="mode-btn" data-mode="react">React</button>
           <button id="btnImportFile" title="Import .js or .jsx file from computer">⬆ Import</button>
           <input id="fileImportInput" type="file" accept=".js,.jsx,.ts,.tsx,.mjs" style="display:none" />
+          <button id="fnPaletteToggle" title="Common functions">Functions</button>
           <button id="clearOutputBtn">Clear output</button>
           <button id="runSnippetBtn">▶ Run &nbsp;<span style="opacity:.55;font-size:10px;">Ctrl+Enter</span></button>
         </div>
@@ -656,6 +723,10 @@ canvas#flameCanvas { display: block; width: 100%; }
             <iframe id="reactPreview" sandbox="allow-scripts allow-same-origin"></iframe>
           </div>
           <div id="srcReturnVal"></div>
+        </div>
+        <div id="fnPalette" aria-hidden="true">
+          <div class="fn-pal-head"><span>Common</span><button id="fnPaletteClose" title="Close">×</button></div>
+          <div id="fnPaletteList"></div>
         </div>
       </div>
     </div>
@@ -778,6 +849,29 @@ const State = {
    UTILITIES
 ═══════════════════════════════════════════════════════════════ */
 function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+(function initTheme(){
+  var key = 'dt_theme';
+  var btn = document.getElementById('themeToggle');
+  function apply(theme){
+    var light = theme === 'light';
+    document.body.classList.toggle('light-theme', light);
+    if(btn){
+      btn.textContent = light ? '◐' : '☀';
+      btn.title = light ? 'Switch to dark theme' : 'Switch to light theme';
+    }
+  }
+  var saved = 'dark';
+  try { saved = localStorage.getItem(key) || 'dark'; } catch(e){}
+  apply(saved);
+  if(btn){
+    btn.addEventListener('click', function(){
+      var next = document.body.classList.contains('light-theme') ? 'dark' : 'light';
+      try { localStorage.setItem(key, next); } catch(e){}
+      apply(next);
+    });
+  }
+})();
 
 function getTime(){
   const d = new Date();
@@ -2042,6 +2136,10 @@ function showStyles(node){
   var srcMode   = 'js';
   var outTab    = 'console';
   var srcLogCount = 0;
+  var editorHistory = [];
+  var editorHistoryIndex = -1;
+  var historyTimer = null;
+  var restoringHistory = false;
 
   var fileList     = document.getElementById('fileList');
   var codeArea     = document.getElementById('codeArea');
@@ -2053,6 +2151,9 @@ function showStyles(node){
   var reactPreview = document.getElementById('reactPreview');
   var srcReturnVal = document.getElementById('srcReturnVal');
   var srcRunStatus = document.getElementById('srcRunStatus');
+  var fnPalette = document.getElementById('fnPalette');
+  var fnPaletteList = document.getElementById('fnPaletteList');
+  var fnPaletteToggle = document.getElementById('fnPaletteToggle');
 
   function currentSnippet(){ return snippets.filter(function(s){ return s.id===activeId; })[0]; }
   function commitCurrentSnippet(){
@@ -2077,6 +2178,61 @@ function showStyles(node){
   function queueSave(){
     clearTimeout(saveTimer);
     saveTimer = setTimeout(saveAll, 180);
+  }
+  function editorSnapshot(){
+    return {
+      value: codeArea.value,
+      start: codeArea.selectionStart,
+      end: codeArea.selectionEnd
+    };
+  }
+  function sameSnapshot(a, b){
+    return a && b && a.value === b.value && a.start === b.start && a.end === b.end;
+  }
+  function recordEditorState(){
+    if(restoringHistory || !codeArea) return;
+    var snap = editorSnapshot();
+    if(sameSnapshot(editorHistory[editorHistoryIndex], snap)) return;
+    editorHistory = editorHistory.slice(0, editorHistoryIndex + 1);
+    editorHistory.push(snap);
+    if(editorHistory.length > 200) editorHistory.shift();
+    editorHistoryIndex = editorHistory.length - 1;
+  }
+  function scheduleEditorHistory(){
+    clearTimeout(historyTimer);
+    historyTimer = setTimeout(recordEditorState, 260);
+  }
+  function resetEditorHistory(){
+    clearTimeout(historyTimer);
+    editorHistory = [];
+    editorHistoryIndex = -1;
+    recordEditorState();
+  }
+  function restoreEditorSnapshot(snap){
+    if(!snap) return;
+    restoringHistory = true;
+    codeArea.value = snap.value;
+    codeArea.selectionStart = snap.start;
+    codeArea.selectionEnd = snap.end;
+    refreshEditor();
+    restoringHistory = false;
+  }
+  function undoEditor(){
+    clearTimeout(historyTimer);
+    recordEditorState();
+    if(editorHistoryIndex <= 0) return;
+    editorHistoryIndex--;
+    restoreEditorSnapshot(editorHistory[editorHistoryIndex]);
+  }
+  function redoEditor(){
+    clearTimeout(historyTimer);
+    if(editorHistoryIndex >= editorHistory.length - 1) return;
+    editorHistoryIndex++;
+    restoreEditorSnapshot(editorHistory[editorHistoryIndex]);
+  }
+  function editorChanged(){
+    refreshEditor();
+    scheduleEditorHistory();
   }
   window.__getSourceSnippets = function(){
     return snippets.map(function(s){
@@ -2132,6 +2288,8 @@ function showStyles(node){
     });
     syncLineNums();
     syncHighlight();
+    resetEditorHistory();
+    renderFunctionPalette();
     clearSrcOutput();
     if(srcMode==='react') switchOutTab('preview');
     else switchOutTab('console');
@@ -2187,9 +2345,83 @@ function showStyles(node){
       document.querySelectorAll('.mode-btn').forEach(function(b){ b.classList.toggle('active', b===btn); });
       var s = currentSnippet(); if(s) s.mode = srcMode;
       if(srcMode==='react') switchOutTab('preview'); else switchOutTab('console');
+      renderFunctionPalette();
       save();
     });
   });
+
+  var JS_FUNCTIONS = [
+    {label:'console.log()', insert:'console.log()'},
+    {label:'console.table()', insert:'console.table()'},
+    {label:'console.error()', insert:'console.error()'},
+    {label:'fetch()', insert:"fetch('url').then(r => r.json()).then(console.log)"},
+    {label:'setTimeout()', insert:'setTimeout(() => {\n  \n}, 1000)'},
+    {label:'JSON.stringify()', insert:'JSON.stringify(value, null, 2)'},
+    {label:'JSON.parse()', insert:'JSON.parse(text)'},
+    {label:'Object.keys()', insert:'Object.keys(obj)'},
+    {label:'Object.entries()', insert:'Object.entries(obj)'},
+    {label:'Array.from()', insert:'Array.from(items)'},
+    {label:'.map()', insert:'.map(item => item)'},
+    {label:'.filter()', insert:'.filter(item => item)'},
+    {label:'.reduce()', insert:'.reduce((acc, item) => acc, initialValue)'},
+    {label:'addEventListener()', insert:"addEventListener('click', event => {\n  \n})"}
+  ];
+  var REACT_FUNCTIONS = [
+    {label:'console.log()', insert:'console.log()'},
+    {label:'React.useState()', insert:'React.useState()'},
+    {label:'React.useEffect()', insert:'React.useEffect(() => {\n  \n}, [])'},
+    {label:'React.useMemo()', insert:'React.useMemo(() => {\n  return value;\n}, [])'},
+    {label:'React.useCallback()', insert:'React.useCallback(() => {\n  \n}, [])'},
+    {label:'React.useRef()', insert:'React.useRef(null)'},
+    {label:'React.useReducer()', insert:'React.useReducer(reducer, initialState)'},
+    {label:'React.memo()', insert:'React.memo(Component)'},
+    {label:'React.forwardRef()', insert:'React.forwardRef((props, ref) => {\n  return null;\n})'},
+    {label:'.map() JSX', insert:'items.map(item => (\n  <div key={item.id}>{item.name}</div>\n))'},
+    {label:'event handler', insert:'const handleClick = () => {\n  \n};'},
+    {label:'setState callback', insert:'setState(prev => prev)'}
+  ];
+  function placeCursorInInsert(start, text){
+    var cursor = start + text.length;
+    var emptyLine = text.indexOf('\n  \n');
+    var parens = text.indexOf('()');
+    if(emptyLine !== -1) cursor = start + emptyLine + 3;
+    else if(parens !== -1) cursor = start + parens + 1;
+    codeArea.selectionStart = codeArea.selectionEnd = cursor;
+  }
+  function insertFunctionSnippet(text){
+    beginEditorMutation();
+    var start = codeArea.selectionStart, end = codeArea.selectionEnd;
+    var before = codeArea.value.slice(0, start);
+    var after = codeArea.value.slice(end);
+    codeArea.value = before + text + after;
+    placeCursorInInsert(start, text);
+    commitEditorMutation();
+    codeArea.focus();
+  }
+  function renderFunctionPalette(){
+    if(!fnPaletteList) return;
+    var list = srcMode === 'react' ? REACT_FUNCTIONS : JS_FUNCTIONS;
+    fnPaletteList.innerHTML = '';
+    list.forEach(function(item){
+      var btn = document.createElement('button');
+      btn.className = 'fn-pal-item';
+      btn.type = 'button';
+      btn.textContent = item.label;
+      btn.title = item.insert;
+      btn.addEventListener('click', function(){ insertFunctionSnippet(item.insert); });
+      fnPaletteList.appendChild(btn);
+    });
+  }
+  function setFunctionPalette(open){
+    if(!fnPalette) return;
+    fnPalette.classList.toggle('open', open);
+    fnPalette.setAttribute('aria-hidden', open ? 'false' : 'true');
+    if(fnPaletteToggle) fnPaletteToggle.classList.toggle('on', open);
+    if(open) renderFunctionPalette();
+  }
+  if(fnPaletteToggle) fnPaletteToggle.addEventListener('click', function(){ setFunctionPalette(!fnPalette.classList.contains('open')); });
+  var fnClose = document.getElementById('fnPaletteClose');
+  if(fnClose) fnClose.addEventListener('click', function(){ setFunctionPalette(false); });
 
   /* Filename rename */
   function saveFilename(){
@@ -2300,6 +2532,14 @@ function showStyles(node){
     syncHighlight();
     queueSave();
   }
+  function commitEditorMutation(){
+    refreshEditor();
+    recordEditorState();
+  }
+  function beginEditorMutation(){
+    clearTimeout(historyTimer);
+    recordEditorState();
+  }
   function syncLineNums(){
     var lines = codeArea.value.split('\n').length;
     if(parseInt(codeLineNums.dataset.count||'0')===lines) return;
@@ -2311,7 +2551,7 @@ function showStyles(node){
       if(i<lines) codeLineNums.appendChild(document.createTextNode('\n'));
     }
   }
-  codeArea.addEventListener('input', refreshEditor);
+  codeArea.addEventListener('input', editorChanged);
   codeArea.addEventListener('scroll', function(){ codeLineNums.scrollTop=codeArea.scrollTop; syncHighlight(); });
   function shouldAutoSemicolon(line){
     var t = line.trim();
@@ -2337,10 +2577,11 @@ function showStyles(node){
     var lineStart = before.lastIndexOf('\n') + 1;
     var line = before.slice(lineStart);
     if(!shouldAutoSemicolon(line)) return false;
+    beginEditorMutation();
     var indent = lineIndent(line);
     codeArea.value = before + ';\n' + indent + after;
     codeArea.selectionStart = codeArea.selectionEnd = pos + 2 + indent.length;
-    refreshEditor();
+    commitEditorMutation();
     return true;
   }
   function lineIndent(line){
@@ -2352,6 +2593,7 @@ function showStyles(node){
     return /(?:[{[(]|=>|\b(?:if|else|for|while|switch|try|catch|finally|function|class)\b.*[({]?)$/.test(t) && !/[;]$/.test(t);
   }
   function smartEnter(){
+    beginEditorMutation();
     var start = codeArea.selectionStart, end = codeArea.selectionEnd;
     var before = codeArea.value.slice(0, start);
     var after = codeArea.value.slice(end);
@@ -2367,9 +2609,10 @@ function showStyles(node){
     }
     codeArea.value = before + insert + after;
     codeArea.selectionStart = codeArea.selectionEnd = before.length + cursorOffset;
-    refreshEditor();
+    commitEditorMutation();
   }
   function changeSelectedIndent(outdent){
+    beginEditorMutation();
     var start = codeArea.selectionStart, end = codeArea.selectionEnd;
     var value = codeArea.value;
     var lineStart = value.lastIndexOf('\n', start - 1) + 1;
@@ -2393,7 +2636,7 @@ function showStyles(node){
     codeArea.value = value.slice(0, lineStart) + next + value.slice(lineEnd);
     codeArea.selectionStart = Math.max(lineStart, start + deltaStart);
     codeArea.selectionEnd = Math.max(codeArea.selectionStart, end + deltaEnd);
-    refreshEditor();
+    commitEditorMutation();
   }
   function maybeOutdentClosingBrace(e){
     if(e.ctrlKey || e.metaKey || e.altKey || !/^[}\])]/.test(e.key)) return false;
@@ -2404,23 +2647,33 @@ function showStyles(node){
     var line = before.slice(lineStart);
     if(!/^\s+$/.test(line) || line.length < 2) return false;
     e.preventDefault();
+    beginEditorMutation();
     var newIndent = line.slice(0, Math.max(0, line.length - 2));
     codeArea.value = codeArea.value.slice(0, lineStart) + newIndent + e.key + codeArea.value.slice(pos);
     codeArea.selectionStart = codeArea.selectionEnd = lineStart + newIndent.length + 1;
-    refreshEditor();
+    commitEditorMutation();
     return true;
   }
   codeArea.addEventListener('keydown', function(e){
     if(e.defaultPrevented) return;
+    if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='z'){
+      e.preventDefault();
+      if(e.shiftKey) redoEditor(); else undoEditor();
+      return;
+    }
+    if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='y'){
+      e.preventDefault(); redoEditor(); return;
+    }
     if(e.key==='Tab'){
       e.preventDefault();
       var hasSelection = codeArea.selectionStart !== codeArea.selectionEnd;
       if(hasSelection || e.shiftKey) changeSelectedIndent(e.shiftKey);
       else {
+        beginEditorMutation();
         var s=codeArea.selectionStart;
         codeArea.value=codeArea.value.slice(0,s)+'  '+codeArea.value.slice(codeArea.selectionEnd);
         codeArea.selectionStart=codeArea.selectionEnd=s+2;
-        refreshEditor();
+        commitEditorMutation();
       }
       return;
     }

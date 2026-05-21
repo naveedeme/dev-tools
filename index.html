@@ -1479,7 +1479,7 @@ document.getElementById('btnRun').addEventListener('click', ()=>{
     KW.forEach(function(k, i){ rank.add({n:k, k:'kw', d:'', score:15, order:8000+i}); });
     GLOBALS.forEach(function(g, i){
       var isFn = /^(fetch|setTimeout|clearTimeout|setInterval|clearInterval|requestAnimationFrame|parseInt|parseFloat|isNaN|isFinite|encodeURIComponent|decodeURIComponent|atob|btoa)$/.test(g);
-      rank.add({n:g, k:isFn ? 'fn' : 'const', d:isFn ? 'global' : '', score:COMMON_CALLS[g] || 25, order:9000+i});
+      rank.add({n:g, k:isFn ? 'fn' : 'const', d:isFn ? 'global' : '', score:g === 'console' ? 1000 : (COMMON_CALLS[g] || 25), order:g === 'console' ? -100 : 9000+i});
     });
     if (mode === 'react') rank.add({n:'React', k:'const', d:'react', score:210});
 

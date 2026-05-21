@@ -3,7 +3,7 @@
    Strategy: Cache-first for app shell; network-first for CDN.
    ───────────────────────────────────────────────────────────── */
 
-const CACHE_NAME   = 'devtools-v9';
+const CACHE_NAME   = 'devtools-v10';
 const SHELL_ASSETS = [
   './',
   './index.html',

@@ -306,7 +306,7 @@ table.ctable tr:hover td { background: rgba(255,255,255,0.03); }
   font-family: sans-serif; font-size: 11px; padding: 2px 10px; border-radius: 3px; cursor: pointer;
 }
 #clearOutputBtn:hover, #btnImportFile:hover { color: var(--text); }
-#codeEditorBody { flex: 1; display: flex; overflow: auto; background: var(--bg); min-height: 0; }
+#codeEditorBody { flex: 1; display: flex; overflow: hidden; background: var(--bg); min-height: 0; }
 #codeLineNums {
   background: var(--bg2); color: var(--text2);
   font-family: 'Consolas','Courier New',monospace; font-size: 13px;
@@ -315,13 +315,33 @@ table.ctable tr:hover td { background: rgba(255,255,255,0.03); }
   border-right: 1px solid var(--border); min-width: 42px;
   white-space: pre; overflow: hidden;
 }
-#codeArea {
-  flex: 1; background: var(--bg); color: var(--text);
+#codeInputWrap { flex: 1; position: relative; min-width: 0; background: var(--bg); }
+#codeHighlight, #codeArea {
+  position: absolute; inset: 0;
   border: none; outline: none; resize: none;
   font-family: 'Consolas','Courier New',monospace; font-size: 13px;
   padding: 10px 14px; line-height: 1.6; tab-size: 2;
-  overflow: visible; white-space: pre;
+  white-space: pre; overflow: auto;
 }
+#codeHighlight {
+  pointer-events: none; color: var(--text);
+  background: var(--bg); margin: 0; overflow: hidden;
+}
+#codeHighlight code { display: block; min-height: 100%; }
+#codeArea {
+  background: transparent; color: transparent; caret-color: #fff;
+  z-index: 1; -webkit-text-fill-color: transparent;
+}
+#codeArea::selection { background: rgba(38,79,120,.72); }
+.tok-kw { color: #569cd6; }
+.tok-fn { color: #dcdcaa; }
+.tok-str { color: #ce9178; }
+.tok-num { color: #b5cea8; }
+.tok-bool, .tok-null { color: #569cd6; }
+.tok-cmt { color: #6a9955; font-style: italic; }
+.tok-tag { color: #569cd6; }
+.tok-attr { color: #9cdcfe; }
+.tok-punc { color: #808080; }
 #outputPaneResizer {
   height: 5px; background: transparent; cursor: ns-resize; flex-shrink: 0;
   border-top: 1px solid var(--border);
@@ -619,7 +639,10 @@ canvas#flameCanvas { display: block; width: 100%; }
         </div>
         <div id="codeEditorBody">
           <div id="codeLineNums"></div>
-          <textarea id="codeArea" spellcheck="false"></textarea>
+          <div id="codeInputWrap">
+            <pre id="codeHighlight" aria-hidden="true"><code></code></pre>
+            <textarea id="codeArea" spellcheck="false" autocomplete="off" autocapitalize="off"></textarea>
+          </div>
         </div>
         <div id="outputPaneResizer"></div>
         <div id="outputPane">
@@ -2022,6 +2045,8 @@ function showStyles(node){
 
   var fileList     = document.getElementById('fileList');
   var codeArea     = document.getElementById('codeArea');
+  var codeHighlight= document.getElementById('codeHighlight');
+  var codeHighlightCode = codeHighlight && codeHighlight.querySelector('code');
   var codeLineNums = document.getElementById('codeLineNums');
   var codeFilename = document.getElementById('codeFilename');
   var srcConsoleOut= document.getElementById('srcConsoleOut');
@@ -2106,6 +2131,7 @@ function showStyles(node){
       b.classList.toggle('active', b.dataset.mode===srcMode);
     });
     syncLineNums();
+    syncHighlight();
     clearSrcOutput();
     if(srcMode==='react') switchOutTab('preview');
     else switchOutTab('console');
@@ -2226,6 +2252,54 @@ function showStyles(node){
   })();
 
   /* Line numbers */
+  function highlightTag(raw){
+    var out = '', i = 0, m;
+    var re = /([A-Za-z_:][-A-Za-z0-9_:.]*)(\s*=\s*)("[^"]*"|'[^']*'|[^\s>]+)?/g;
+    var first = raw.match(/^<\/?[A-Za-z][A-Za-z0-9:-]*/);
+    if(!first) return '<span class="tok-punc">'+esc(raw)+'</span>';
+    out += '<span class="tok-punc">'+esc(raw.slice(0, raw.charAt(1)==='/' ? 2 : 1))+'</span>';
+    out += '<span class="tok-tag">'+esc(first[0].replace(/^<\/?/, ''))+'</span>';
+    i = first[0].length;
+    re.lastIndex = i;
+    while((m = re.exec(raw))){
+      out += esc(raw.slice(i, m.index));
+      out += '<span class="tok-attr">'+esc(m[1])+'</span>';
+      if(m[2]) out += '<span class="tok-punc">'+esc(m[2])+'</span>';
+      if(m[3]) out += '<span class="tok-str">'+esc(m[3])+'</span>';
+      i = re.lastIndex;
+    }
+    out += esc(raw.slice(i)).replace(/(&gt;|\/&gt;)$/, '<span class="tok-punc">$1</span>');
+    return out;
+  }
+  function syntaxHighlight(code){
+    var s = String(code || ''), out = '', i = 0;
+    var kw = /^(?:const|let|var|function|class|return|if|else|for|while|do|switch|case|break|continue|try|catch|finally|throw|new|delete|typeof|instanceof|in|of|async|await|this|import|export|from|default|extends|super)\b/;
+    while(i < s.length){
+      var rest = s.slice(i), m;
+      if(rest.indexOf('//') === 0){ m = rest.match(/^\/\/[^\n]*/)[0]; out += '<span class="tok-cmt">'+esc(m)+'</span>'; i += m.length; continue; }
+      if(rest.indexOf('/*') === 0){ m = rest.match(/^\/\*[\s\S]*?(?:\*\/|$)/)[0]; out += '<span class="tok-cmt">'+esc(m)+'</span>'; i += m.length; continue; }
+      if(/^["'`]/.test(rest)){ var q=rest[0], j=1, br=false; while(j<rest.length){ var ch=rest[j]; if(br){ br=false; j++; continue; } if(ch==='\\'){ br=true; j++; continue; } if(ch===q){ j++; break; } j++; } m=rest.slice(0,j); out += '<span class="tok-str">'+esc(m)+'</span>'; i += m.length; continue; }
+      if(/^<\/?[A-Za-z][^>\n]*>/.test(rest)){ m = rest.match(/^<\/?[A-Za-z][^>\n]*>/)[0]; out += highlightTag(m); i += m.length; continue; }
+      if(/^\b(?:true|false)\b/.test(rest)){ m=rest.match(/^\b(?:true|false)\b/)[0]; out += '<span class="tok-bool">'+m+'</span>'; i += m.length; continue; }
+      if(/^\b(?:null|undefined)\b/.test(rest)){ m=rest.match(/^\b(?:null|undefined)\b/)[0]; out += '<span class="tok-null">'+m+'</span>'; i += m.length; continue; }
+      if(/^(?:0x[\da-fA-F]+|\d+(?:\.\d+)?)(?:e[+-]?\d+)?\b/.test(rest)){ m=rest.match(/^(?:0x[\da-fA-F]+|\d+(?:\.\d+)?)(?:e[+-]?\d+)?\b/)[0]; out += '<span class="tok-num">'+m+'</span>'; i += m.length; continue; }
+      if((m = rest.match(kw))){ out += '<span class="tok-kw">'+esc(m[0])+'</span>'; i += m[0].length; continue; }
+      if(/^[$A-Z_a-z][$\w]*(?=\s*\()/.test(rest)){ m=rest.match(/^[$A-Z_a-z][$\w]*/)[0]; out += '<span class="tok-fn">'+esc(m)+'</span>'; i += m.length; continue; }
+      if(/^[{}()[\].,;:+\-*/%=&|!<>?]+/.test(rest)){ m=rest.match(/^[{}()[\].,;:+\-*/%=&|!<>?]+/)[0]; out += '<span class="tok-punc">'+esc(m)+'</span>'; i += m.length; continue; }
+      out += esc(s[i]); i++;
+    }
+    return out || ' ';
+  }
+  function syncHighlight(){
+    if(!codeHighlightCode) return;
+    codeHighlightCode.innerHTML = syntaxHighlight(codeArea.value) + (codeArea.value.endsWith('\n') ? ' ' : '');
+    codeHighlightCode.style.transform = 'translate(' + (-codeArea.scrollLeft) + 'px,' + (-codeArea.scrollTop) + 'px)';
+  }
+  function refreshEditor(){
+    syncLineNums();
+    syncHighlight();
+    queueSave();
+  }
   function syncLineNums(){
     var lines = codeArea.value.split('\n').length;
     if(parseInt(codeLineNums.dataset.count||'0')===lines) return;
@@ -2237,8 +2311,8 @@ function showStyles(node){
       if(i<lines) codeLineNums.appendChild(document.createTextNode('\n'));
     }
   }
-  codeArea.addEventListener('input', function(){ syncLineNums(); queueSave(); });
-  codeArea.addEventListener('scroll', function(){ codeLineNums.scrollTop=codeArea.scrollTop; });
+  codeArea.addEventListener('input', refreshEditor);
+  codeArea.addEventListener('scroll', function(){ codeLineNums.scrollTop=codeArea.scrollTop; syncHighlight(); });
   function shouldAutoSemicolon(line){
     var t = line.trim();
     if(!t || /^(\/\/|\/\*)/.test(t)) return false;
@@ -2263,23 +2337,98 @@ function showStyles(node){
     var lineStart = before.lastIndexOf('\n') + 1;
     var line = before.slice(lineStart);
     if(!shouldAutoSemicolon(line)) return false;
-    codeArea.value = before + ';\n' + after;
-    codeArea.selectionStart = codeArea.selectionEnd = pos + 2;
-    syncLineNums();
-    queueSave();
+    var indent = lineIndent(line);
+    codeArea.value = before + ';\n' + indent + after;
+    codeArea.selectionStart = codeArea.selectionEnd = pos + 2 + indent.length;
+    refreshEditor();
+    return true;
+  }
+  function lineIndent(line){
+    var m = line.match(/^[ \t]*/);
+    return m ? m[0].replace(/\t/g, '  ') : '';
+  }
+  function shouldIndentAfter(line){
+    var t = line.trim();
+    return /(?:[{[(]|=>|\b(?:if|else|for|while|switch|try|catch|finally|function|class)\b.*[({]?)$/.test(t) && !/[;]$/.test(t);
+  }
+  function smartEnter(){
+    var start = codeArea.selectionStart, end = codeArea.selectionEnd;
+    var before = codeArea.value.slice(0, start);
+    var after = codeArea.value.slice(end);
+    var lineStart = before.lastIndexOf('\n') + 1;
+    var line = before.slice(lineStart);
+    var indent = lineIndent(line);
+    var extra = shouldIndentAfter(line) ? '  ' : '';
+    var closing = after.match(/^\s*[}\])]/);
+    var insert = '\n' + indent + extra;
+    var cursorOffset = insert.length;
+    if(closing && extra){
+      insert += '\n' + indent;
+    }
+    codeArea.value = before + insert + after;
+    codeArea.selectionStart = codeArea.selectionEnd = before.length + cursorOffset;
+    refreshEditor();
+  }
+  function changeSelectedIndent(outdent){
+    var start = codeArea.selectionStart, end = codeArea.selectionEnd;
+    var value = codeArea.value;
+    var lineStart = value.lastIndexOf('\n', start - 1) + 1;
+    var lineEnd = end;
+    if(end > start && value.charAt(end - 1) === '\n') lineEnd = end - 1;
+    lineEnd = value.indexOf('\n', lineEnd);
+    if(lineEnd === -1) lineEnd = value.length;
+    var block = value.slice(lineStart, lineEnd);
+    var deltaStart = 0, deltaEnd = 0;
+    var lines = block.split('\n').map(function(line, idx){
+      if(outdent){
+        if(line.indexOf('  ') === 0){ if(lineStart + deltaEnd < start && idx === 0) deltaStart -= 2; deltaEnd -= 2; return line.slice(2); }
+        if(line.charAt(0) === '\t'){ if(lineStart + deltaEnd < start && idx === 0) deltaStart -= 1; deltaEnd -= 1; return line.slice(1); }
+        return line;
+      }
+      if(idx === 0 && start > lineStart) deltaStart += 2;
+      deltaEnd += 2;
+      return '  ' + line;
+    });
+    var next = lines.join('\n');
+    codeArea.value = value.slice(0, lineStart) + next + value.slice(lineEnd);
+    codeArea.selectionStart = Math.max(lineStart, start + deltaStart);
+    codeArea.selectionEnd = Math.max(codeArea.selectionStart, end + deltaEnd);
+    refreshEditor();
+  }
+  function maybeOutdentClosingBrace(e){
+    if(e.ctrlKey || e.metaKey || e.altKey || !/^[}\])]/.test(e.key)) return false;
+    var pos = codeArea.selectionStart;
+    if(pos !== codeArea.selectionEnd) return false;
+    var before = codeArea.value.slice(0, pos);
+    var lineStart = before.lastIndexOf('\n') + 1;
+    var line = before.slice(lineStart);
+    if(!/^\s+$/.test(line) || line.length < 2) return false;
+    e.preventDefault();
+    var newIndent = line.slice(0, Math.max(0, line.length - 2));
+    codeArea.value = codeArea.value.slice(0, lineStart) + newIndent + e.key + codeArea.value.slice(pos);
+    codeArea.selectionStart = codeArea.selectionEnd = lineStart + newIndent.length + 1;
+    refreshEditor();
     return true;
   }
   codeArea.addEventListener('keydown', function(e){
     if(e.defaultPrevented) return;
     if(e.key==='Tab'){
       e.preventDefault();
-      var s=codeArea.selectionStart;
-      codeArea.value=codeArea.value.slice(0,s)+'  '+codeArea.value.slice(codeArea.selectionEnd);
-      codeArea.selectionStart=codeArea.selectionEnd=s+2;
-      syncLineNums();
+      var hasSelection = codeArea.selectionStart !== codeArea.selectionEnd;
+      if(hasSelection || e.shiftKey) changeSelectedIndent(e.shiftKey);
+      else {
+        var s=codeArea.selectionStart;
+        codeArea.value=codeArea.value.slice(0,s)+'  '+codeArea.value.slice(codeArea.selectionEnd);
+        codeArea.selectionStart=codeArea.selectionEnd=s+2;
+        refreshEditor();
+      }
+      return;
     }
-    if(e.key==='Enter' && !e.ctrlKey && !e.metaKey && !e.shiftKey && insertAutoSemicolonBeforeEnter()){
+    if(maybeOutdentClosingBrace(e)) return;
+    if(e.key==='Enter' && !e.ctrlKey && !e.metaKey && !e.shiftKey){
       e.preventDefault();
+      if(!insertAutoSemicolonBeforeEnter()) smartEnter();
+      return;
     }
     if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){ e.preventDefault(); runSnippet(); }
   });
@@ -2816,32 +2965,6 @@ function renderSW(pane){
 /* ═══════════════════════════════════════════════════════════════
    BOOT
 ═══════════════════════════════════════════════════════════════ */
-/* ── Code editor line numbers ─────────────────────────────── */
-(function(){
-  const ta   = document.getElementById('codeArea');
-  const nums = document.getElementById('codeLineNums');
-  function syncLines(){
-    const lines = ta.value.split('\n').length;
-    const current = nums.childElementCount;
-    if(lines === current) return;
-    nums.innerHTML = '';
-    for(let i=1;i<=lines;i++){
-      const s=document.createElement('span');
-      s.textContent=i;
-      nums.appendChild(s);
-      if(i<lines) nums.appendChild(document.createTextNode('\n'));
-    }
-  }
-  function syncScroll(){ nums.scrollTop = ta.scrollTop; }
-  ta.addEventListener('input',  syncLines);
-  ta.addEventListener('scroll', syncScroll);
-  ta.addEventListener('keydown', function(e){
-    if(e.defaultPrevented) return;
-    if(e.key==='Tab'){ e.preventDefault(); const s=ta.selectionStart; ta.value=ta.value.slice(0,s)+'  '+ta.value.slice(ta.selectionEnd); ta.selectionStart=ta.selectionEnd=s+2; syncLines(); }
-  });
-  syncLines();
-})();
-
 window.addEventListener('load', ()=>{
   addEntry('system', 'Chrome DevTools — JavaScript VM ready', '');
   addEntry('system',

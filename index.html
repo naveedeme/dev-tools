@@ -518,6 +518,8 @@ canvas#flameCanvas { display: block; width: 100%; }
 .ack-class { background:#dcdcaa; color:#1e1e1e; }
 .ack-snip  { background:#6a9955; color:#fff;    }
 .ack-prop  { background:#dcdcaa; color:#1e1e1e; }
+.ac-num { color:#777; font-size:11px; min-width:12px; text-align:right; flex-shrink:0; }
+.aci.on .ac-num, .aci:hover .ac-num { color:#cfe9ff; }
 .acn { flex:1; overflow:hidden; text-overflow:ellipsis; }
 .acn b { color:#4fc1ff; font-weight:normal; }
 .acd { color:#777; font-size:11px; flex-shrink:0; }
@@ -1239,6 +1241,9 @@ document.getElementById('btnRun').addEventListener('click', ()=>{
   var JS_KEYWORDS = {};
   KW.concat('import export default from as get set static extends super yield void debugger'.split(' '))
     .forEach(function(k){ JS_KEYWORDS[k] = 1; });
+  var CHAIN_TARGETS = {};
+  'console Math JSON Object Array String Number Boolean Date RegExp Error Promise Map Set WeakMap WeakSet Reflect document window navigator location history localStorage sessionStorage React'.split(' ')
+    .forEach(function(k){ CHAIN_TARGETS[k] = 1; });
 
   function safeType(obj, key) {
     try { return typeof obj[key]; } catch(e) { return ''; }
@@ -1555,6 +1560,8 @@ document.getElementById('btnRun').addEventListener('click', ()=>{
     var html = '';
     items.forEach(function(item, i) {
       html += '<div class="aci" data-i="'+i+'">';
+      if (i < 9) html += '<span class="ac-num">'+(i+1)+'</span>';
+      else html += '<span class="ac-num"></span>';
       html += '<span class="'+kindCls(item.k)+'">'+kindLbl(item.k)+'</span>';
       html += '<span class="acn">'+hlText(item.n, pfx)+'</span>';
       if (item.d) html += '<span class="acd">'+item.d+'</span>';
@@ -1581,6 +1588,23 @@ document.getElementById('btnRun').addEventListener('click', ()=>{
     });
   }
 
+  function dispatchEditorInput(input) {
+    suppressInput++;
+    input.dispatchEvent(new Event('input', { bubbles:true }));
+    suppressInput--;
+  }
+
+  function shouldAutoDot(item, input, before) {
+    if (!item || item.v || item.k === 'fn' || item.k === 'kw' || item.k === 'snip') return false;
+    if (CHAIN_TARGETS[item.n] || item.d === 'react') return true;
+    try {
+      var corpus = analyzeSources(input, before);
+      if (corpus.members && corpus.members[item.n]) return true;
+      var obj = resolvePathObject(item.n, before);
+      return obj != null && (typeof obj === 'object' || typeof obj === 'function');
+    } catch(e) { return false; }
+  }
+
   function apply(input, item) {
     if (!item || !input) return;
     var val    = input.value;
@@ -1597,6 +1621,8 @@ document.getElementById('btnRun').addEventListener('click', ()=>{
     }
     var before = val.slice(0, pos - pfxLen);
     var after  = val.slice(pos);
+    var addDot = ctx.type === 'global' && shouldAutoDot(item, input, val.slice(0, pos));
+    if (addDot && after.charAt(0) !== '.') insert += '.';
     input.value  = before + insert + after;
     /* cursor: inside parens if present */
     var np = before.length + insert.length;
@@ -1605,10 +1631,9 @@ document.getElementById('btnRun').addEventListener('click', ()=>{
     input.selectionStart = input.selectionEnd = np;
     if (input.id === 'consoleInput') autoResize(input);
     hide();
-    suppressInput++;
-    input.dispatchEvent(new Event('input', { bubbles:true }));
-    suppressInput--;
+    dispatchEditorInput(input);
     input.focus();
+    if (addDot) setTimeout(function(){ refresh(input); }, 0);
   }
 
   function refresh(input) {
@@ -1619,12 +1644,84 @@ document.getElementById('btnRun').addEventListener('click', ()=>{
     render(input, completions(before, input), ctx.pfx);
   }
 
+  function escapedBefore(text, pos) {
+    var count = 0;
+    for (var i = pos - 1; i >= 0 && text.charAt(i) === '\\'; i--) count++;
+    return count % 2 === 1;
+  }
+
+  function dispatchPairEdit(input) {
+    if (input.id === 'consoleInput') autoResize(input);
+    dispatchEditorInput(input);
+  }
+
+  function handlePairedKey(input, e) {
+    if (e.ctrlKey || e.metaKey || e.altKey) return false;
+    var pairs = {'"':'"', "'":"'", '`':'`', '(' : ')', '[':']', '{':'}'};
+    var closers = {')':'(', ']':'[', '}':'{'};
+    var key = e.key;
+    var val = input.value;
+    var start = input.selectionStart;
+    var end = input.selectionEnd;
+    var before = val.slice(0, start);
+    var selected = val.slice(start, end);
+    var after = val.slice(end);
+
+    if (key === 'Backspace' && start === end && start > 0) {
+      var prev = val.charAt(start - 1), next = val.charAt(start);
+      if ((pairs[prev] && pairs[prev] === next) || (prev === '`' && next === '`')) {
+        e.preventDefault();
+        input.value = val.slice(0, start - 1) + val.slice(start + 1);
+        input.selectionStart = input.selectionEnd = start - 1;
+        dispatchPairEdit(input);
+        return true;
+      }
+      return false;
+    }
+
+    if (closers[key] && start === end && val.charAt(start) === key) {
+      e.preventDefault();
+      input.selectionStart = input.selectionEnd = start + 1;
+      return true;
+    }
+
+    if (!pairs[key]) return false;
+    if ((key === '"' || key === "'" || key === '`') && escapedBefore(val, start)) return false;
+    e.preventDefault();
+
+    if (selected) {
+      input.value = before + key + selected + pairs[key] + after;
+      input.selectionStart = start + 1;
+      input.selectionEnd = end + 1;
+      dispatchPairEdit(input);
+      return true;
+    }
+
+    if ((key === '"' || key === "'" || key === '`') && val.charAt(start) === key) {
+      input.selectionStart = input.selectionEnd = start + 1;
+      return true;
+    }
+
+    input.value = before + key + pairs[key] + after;
+    input.selectionStart = input.selectionEnd = start + 1;
+    dispatchPairEdit(input);
+    return true;
+  }
+
   function install(input) {
     if (!input) return;
     input.addEventListener('input', function(){ refresh(input); });
     input.addEventListener('click', function(){ if (activeInput === input) refresh(input); });
     input.addEventListener('keydown', function(e) {
     var open = getBox().style.display !== 'none' && activeInput === input;
+    if (open && /^[1-9]$/.test(e.key)) {
+      var idx = Number(e.key) - 1;
+      if (idx < list.length) {
+        e.preventDefault(); e.stopPropagation();
+        setActive(idx); return;
+      }
+    }
+    if (handlePairedKey(input, e)) { hide(); e.stopPropagation(); return; }
     if (e.key === 'Tab') {
       if (!open) {
         var before = input.value.slice(0, input.selectionStart);

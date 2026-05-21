@@ -1626,7 +1626,6 @@ document.getElementById('btnRun').addEventListener('click', ()=>{
     var ctx    = getCtx(val.slice(0, pos));
     if (!ctx) { hide(); return; }
     var insert = item.v || item.n;
-    if (!item.v && item.k === 'fn' && insert.indexOf('(') === -1) insert += '()';
     var pfxLen = ctx.pfx.length;
     if (ctx.type === 'global' && item.n.indexOf('.')!==-1) {
       /* full dotted name like console.log — replace from word start */
@@ -1635,6 +1634,8 @@ document.getElementById('btnRun').addEventListener('click', ()=>{
     }
     var before = val.slice(0, pos - pfxLen);
     var after  = val.slice(pos);
+    var existingCall = /^\s*\(/.test(after);
+    if (!item.v && item.k === 'fn' && insert.indexOf('(') === -1 && !existingCall) insert += '()';
     var addDot = ctx.type === 'global' && shouldAutoDot(item, input, val.slice(0, pos));
     if (addDot && after.charAt(0) !== '.') insert += '.';
     input.value  = before + insert + after;

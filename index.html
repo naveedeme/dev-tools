@@ -304,11 +304,28 @@ table.ctable tr:hover td { background: rgba(255,255,255,0.03); }
 .file-item.active { background: rgba(0,122,204,0.18); border-left-color: var(--accent); color: var(--blue); }
 .file-item.project-file { padding-left: 22px; }
 .fi-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
-.fi-del  { display: none; background: none; border: none; color: var(--text2); font-size: 14px; cursor: pointer; padding: 0 3px; border-radius: 2px; line-height: 1; }
-.file-item:hover .fi-del { display: block; }
+.fi-actions { display: none; align-items: center; gap: 2px; flex-shrink: 0; }
+.file-item:hover .fi-actions { display: flex; }
+.fi-export, .fi-del  { background: none; border: none; color: var(--text2); font-size: 13px; cursor: pointer; padding: 0 3px; border-radius: 2px; line-height: 1; }
+.fi-export:hover { color: var(--blue); }
 .fi-del:hover { color: var(--red); }
 .fi-icon { font-size: 11px; flex-shrink: 0; opacity: .75; }
-.project-group { padding: 7px 10px 3px; color: var(--text2); font-size: 10px; text-transform: uppercase; letter-spacing:.05em; }
+.project-group {
+  padding: 7px 8px 3px 10px; color: var(--text2); font-size: 10px;
+  display: flex; align-items: center; gap: 4px;
+}
+.project-name-input {
+  min-width: 0; flex: 1; background: transparent; color: var(--text2); border: 1px solid transparent;
+  border-radius: 3px; padding: 2px 3px; font-size: 10px; text-transform: uppercase; letter-spacing:.05em;
+  outline: none;
+}
+.project-name-input:hover, .project-name-input:focus { border-color: var(--border); background: var(--bg); color: var(--text); }
+.project-action {
+  background: none; border: none; color: var(--text2); border-radius: 3px; cursor: pointer;
+  padding: 1px 3px; font-size: 11px; line-height: 1;
+}
+.project-action:hover { background: rgba(127,127,127,.14); color: var(--text); }
+.project-action.danger:hover { color: var(--red); }
 #codeEditor { flex: 1; display: flex; flex-direction: column; min-width: 0; position: relative; }
 #codeToolbar {
   background: var(--bg2); border-bottom: 1px solid var(--border);
@@ -407,12 +424,12 @@ body.light-theme .tok-punc { color: #444; }
   background: var(--accent); color: #fff; border: none; border-radius: 4px;
   padding: 5px 8px; font-family: sans-serif; font-size: 12px; cursor: pointer;
 }
-.fn-pal-add input, .fn-pal-add textarea {
+.fn-pal-actions input, .fn-pal-add input, .fn-pal-add textarea {
   background: var(--bg); color: var(--text); border: 1px solid var(--border);
   border-radius: 4px; padding: 5px 7px; font-family: 'Consolas','Courier New',monospace; font-size: 12px; outline: none;
 }
 .fn-pal-add textarea { min-height: 52px; resize: vertical; }
-.fn-pal-add input:focus, .fn-pal-add textarea:focus { border-color: var(--accent); }
+.fn-pal-actions input:focus, .fn-pal-add input:focus, .fn-pal-add textarea:focus { border-color: var(--accent); }
 .fn-pal-add-title { color: var(--text2); font-size: 11px; }
 .fn-pal-item {
   border: 1px solid transparent; background: transparent; color: var(--text);
@@ -715,6 +732,7 @@ canvas#flameCanvas { display: block; width: 100%; }
           <button class="mode-btn" data-mode="css">CSS</button>
           <button id="btnImportFile" title="Import .js, .jsx or .css file from computer">⬆ Import</button>
           <input id="fileImportInput" type="file" accept=".js,.jsx,.ts,.tsx,.mjs,.css" style="display:none" />
+          <button id="btnExportFile" title="Export current snippet or project">Export</button>
           <button id="fnPaletteToggle" title="Common functions">Functions</button>
           <button id="clearOutputBtn">Clear output</button>
           <button id="runSnippetBtn">▶ Run &nbsp;<span style="opacity:.55;font-size:10px;">Ctrl+Enter</span></button>
@@ -742,6 +760,7 @@ canvas#flameCanvas { display: block; width: 100%; }
         <div id="fnPalette" aria-hidden="true">
           <div class="fn-pal-head"><span>Common</span><button id="fnPaletteClose" title="Close">×</button></div>
           <div class="fn-pal-actions">
+            <input id="reactProjectName" placeholder="React Project 1" spellcheck="false" />
             <button id="btnCreateReactProject" type="button">Create React project folder</button>
           </div>
           <div class="fn-pal-add">
@@ -2223,6 +2242,132 @@ function showStyles(node){
     try{ localStorage.setItem(FUNCTION_SNIPPETS_KEY, JSON.stringify(customFunctionSnippets)); }catch(e){}
   }
   function saveAll(){ commitCurrentSnippet(); save(); }
+  function uniqueProjectIds(){
+    var ids = {};
+    snippets.forEach(function(s){ if(s.projectId) ids[s.projectId] = 1; });
+    return Object.keys(ids);
+  }
+  function defaultProjectName(){
+    return 'React Project '+(uniqueProjectIds().length + 1);
+  }
+  function updateProjectNamePlaceholder(){
+    var el = document.getElementById('reactProjectName');
+    if(el && !el.value) el.placeholder = defaultProjectName();
+  }
+  function ensureSnippetExists(){
+    if(snippets.length) return;
+    var id = nextId++;
+    snippets.push({ id:id, name:'snippet-'+id+'.js', mode:'js', code:'// Snippet '+id+'\nconsole.log(\'Hello from snippet '+id+'!\');' });
+    activeId = id;
+  }
+  function renameProject(projectId, rawName){
+    var current = snippets.filter(function(s){ return s.projectId === projectId; })[0];
+    var name = String(rawName || '').trim() || (current && current.projectName) || defaultProjectName();
+    snippets.forEach(function(s){ if(s.projectId === projectId) s.projectName = name; });
+    save();
+    renderFileList();
+  }
+  function removeProject(projectId){
+    var project = snippets.filter(function(s){ return s.projectId === projectId; });
+    if(!project.length) return;
+    var name = project[0].projectName || 'React Project';
+    if(!confirm('Remove '+name+' and all of its files?')) return;
+    snippets = snippets.filter(function(s){ return s.projectId !== projectId; });
+    ensureSnippetExists();
+    if(!snippets.some(function(s){ return s.id === activeId; })) activeId = snippets[0].id;
+    save();
+    renderFileList();
+    loadSnippet();
+    updateProjectNamePlaceholder();
+  }
+  function safeFileName(name, fallback){
+    var clean = String(name || '').trim().replace(/[<>:"/\\|?*\x00-\x1F]/g, '-').replace(/\s+/g, ' ');
+    clean = clean.replace(/^\.+|\.+$/g, '').trim();
+    return clean || fallback || 'file';
+  }
+  function mimeForFile(name){
+    if(/\.css$/i.test(name)) return 'text/css';
+    if(/\.(jsx|tsx)$/i.test(name)) return 'text/jsx';
+    if(/\.(json)$/i.test(name)) return 'application/json';
+    return 'text/javascript';
+  }
+  function downloadTextFile(name, text){
+    var blob = new Blob([text], { type:mimeForFile(name) });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 500);
+  }
+  async function writeTextFile(name, text){
+    name = safeFileName(name, 'snippet.js');
+    if(window.showSaveFilePicker && window.isSecureContext){
+      var handle = await window.showSaveFilePicker({
+        suggestedName:name,
+        types:[{ description:'Code file', accept:{ 'text/plain': ['.' + (name.split('.').pop() || 'js')] } }]
+      });
+      var writable = await handle.createWritable();
+      await writable.write(text);
+      await writable.close();
+    } else {
+      downloadTextFile(name, text);
+    }
+  }
+  async function writeProjectFolder(projectId){
+    commitCurrentSnippet();
+    var files = snippets.filter(function(s){ return s.projectId === projectId; });
+    if(!files.length) return;
+    var projectName = safeFileName(files[0].projectName || defaultProjectName(), 'React Project');
+    if(window.showDirectoryPicker && window.isSecureContext){
+      var rootDir = await window.showDirectoryPicker({ mode:'readwrite' });
+      var projectDir = await rootDir.getDirectoryHandle(projectName, { create:true });
+      for(var i=0; i<files.length; i++){
+        var file = files[i];
+        var fileHandle = await projectDir.getFileHandle(safeFileName(file.name, 'file.js'), { create:true });
+        var writable = await fileHandle.createWritable();
+        await writable.write(file.code || '');
+        await writable.close();
+      }
+    } else {
+      files.forEach(function(file){
+        downloadTextFile(projectName + '-' + safeFileName(file.name, 'file.js'), file.code || '');
+      });
+    }
+  }
+  async function exportSnippet(snippet){
+    try{
+      commitCurrentSnippet();
+      var file = snippet && snippets.filter(function(s){ return s.id === snippet.id; })[0] || currentSnippet();
+      if(!file) return;
+      await writeTextFile(file.name, file.code || '');
+      srcRunStatus.textContent = 'Exported '+file.name;
+      srcRunStatus.style.color = 'var(--green)';
+    } catch(e) {
+      if(e && e.name === 'AbortError') return;
+      srcRunStatus.textContent = 'Export failed';
+      srcRunStatus.style.color = 'var(--red)';
+    }
+  }
+  async function exportProject(projectId){
+    try{
+      await writeProjectFolder(projectId);
+      srcRunStatus.textContent = 'Project exported';
+      srcRunStatus.style.color = 'var(--green)';
+    } catch(e) {
+      if(e && e.name === 'AbortError') return;
+      srcRunStatus.textContent = 'Project export failed';
+      srcRunStatus.style.color = 'var(--red)';
+    }
+  }
+  async function exportCurrent(){
+    var s = currentSnippet();
+    if(!s) return;
+    if(s.projectId) await exportProject(s.projectId);
+    else await exportSnippet(s);
+  }
   var saveTimer = null;
   function queueSave(){
     clearTimeout(saveTimer);
@@ -2305,7 +2450,35 @@ function showStyles(node){
         renderedProjects[s.projectId] = 1;
         var group = document.createElement('div');
         group.className = 'project-group';
-        group.textContent = s.projectName || 'React Project';
+        var nameInput = document.createElement('input');
+        nameInput.className = 'project-name-input';
+        nameInput.value = s.projectName || defaultProjectName();
+        nameInput.title = 'Rename project';
+        nameInput.addEventListener('click', function(e){ e.stopPropagation(); });
+        nameInput.addEventListener('keydown', function(e){ e.stopPropagation(); });
+        nameInput.addEventListener('change', function(){ renameProject(s.projectId, nameInput.value); });
+        nameInput.addEventListener('blur', function(){ renameProject(s.projectId, nameInput.value); });
+        var exportProjectBtn = document.createElement('button');
+        exportProjectBtn.className = 'project-action';
+        exportProjectBtn.type = 'button';
+        exportProjectBtn.title = 'Export project';
+        exportProjectBtn.textContent = '↓';
+        exportProjectBtn.addEventListener('click', function(e){
+          e.stopPropagation();
+          exportProject(s.projectId);
+        });
+        var removeProjectBtn = document.createElement('button');
+        removeProjectBtn.className = 'project-action danger';
+        removeProjectBtn.type = 'button';
+        removeProjectBtn.title = 'Remove project';
+        removeProjectBtn.textContent = '×';
+        removeProjectBtn.addEventListener('click', function(e){
+          e.stopPropagation();
+          removeProject(s.projectId);
+        });
+        group.appendChild(nameInput);
+        group.appendChild(exportProjectBtn);
+        group.appendChild(removeProjectBtn);
         fileList.appendChild(group);
       }
       var item = document.createElement('div');
@@ -2314,11 +2487,19 @@ function showStyles(node){
       item.innerHTML =
         '<span class="fi-icon">'+(s.mode==='react'?'&#x269B;':s.mode==='css'?'#':'&#128196;')+'</span>'+
         '<span class="fi-name">'+esc(s.name)+'</span>'+
-        '<button class="fi-del" title="Delete">\u00d7</button>';
+        '<span class="fi-actions">'+
+          '<button class="fi-export" title="Export file">\u2193</button>'+
+          '<button class="fi-del" title="Delete">\u00d7</button>'+
+        '</span>';
+      item.querySelector('.fi-export').addEventListener('click', function(e){
+        e.stopPropagation();
+        exportSnippet(s);
+      });
       item.querySelector('.fi-del').addEventListener('click', function(e){
         e.stopPropagation();
         if(snippets.length===1) return;
         snippets = snippets.filter(function(x){ return x.id!==s.id; });
+        ensureSnippetExists();
         if(activeId===s.id) activeId=snippets[0].id;
         save(); renderFileList(); loadSnippet();
       });
@@ -2347,6 +2528,7 @@ function showStyles(node){
     syncHighlight();
     resetEditorHistory();
     renderFunctionPalette();
+    updateProjectNamePlaceholder();
     clearSrcOutput();
     if(srcMode==='react') switchOutTab('preview');
     else if(srcMode==='css' && s.projectId) switchOutTab('preview');
@@ -2493,9 +2675,8 @@ function showStyles(node){
   function createReactProjectFolder(){
     commitCurrentSnippet();
     var projectId = 'react-project-'+Date.now();
-    var existingProjects = {};
-    snippets.forEach(function(s){ if(s.projectId) existingProjects[s.projectId] = 1; });
-    var projectName = 'React Project '+(Object.keys(existingProjects).length + 1);
+    var nameEl = document.getElementById('reactProjectName');
+    var projectName = (nameEl && nameEl.value.trim()) || defaultProjectName();
     var mainId = nextId++, appId = nextId++, utilId = nextId++, cssId = nextId++;
     snippets.push({
       id:mainId, name:'main.jsx', mode:'react', projectId:projectId, projectName:projectName, projectRole:'main',
@@ -2518,6 +2699,10 @@ function showStyles(node){
     renderFileList();
     loadSnippet();
     switchOutTab('preview');
+    if(nameEl){
+      nameEl.value = '';
+      updateProjectNamePlaceholder();
+    }
   }
   function setFunctionPalette(open){
     if(!fnPalette) return;
@@ -2533,6 +2718,8 @@ function showStyles(node){
   if(addFnBtn) addFnBtn.addEventListener('click', addCustomFunctionSnippet);
   var projectBtn = document.getElementById('btnCreateReactProject');
   if(projectBtn) projectBtn.addEventListener('click', createReactProjectFolder);
+  var exportBtn = document.getElementById('btnExportFile');
+  if(exportBtn) exportBtn.addEventListener('click', exportCurrent);
 
   /* Filename rename */
   function saveFilename(){

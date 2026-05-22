@@ -302,11 +302,13 @@ table.ctable tr:hover td { background: rgba(255,255,255,0.03); }
 }
 .file-item:hover  { background: rgba(255,255,255,0.05); }
 .file-item.active { background: rgba(0,122,204,0.18); border-left-color: var(--accent); color: var(--blue); }
+.file-item.project-file { padding-left: 22px; }
 .fi-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .fi-del  { display: none; background: none; border: none; color: var(--text2); font-size: 14px; cursor: pointer; padding: 0 3px; border-radius: 2px; line-height: 1; }
 .file-item:hover .fi-del { display: block; }
 .fi-del:hover { color: var(--red); }
 .fi-icon { font-size: 11px; flex-shrink: 0; opacity: .75; }
+.project-group { padding: 7px 10px 3px; color: var(--text2); font-size: 10px; text-transform: uppercase; letter-spacing:.05em; }
 #codeEditor { flex: 1; display: flex; flex-direction: column; min-width: 0; position: relative; }
 #codeToolbar {
   background: var(--bg2); border-bottom: 1px solid var(--border);
@@ -400,6 +402,18 @@ body.light-theme .tok-punc { color: #444; }
 }
 .fn-pal-head button:hover { background: rgba(127,127,127,.14); color: var(--text); }
 #fnPaletteList { overflow-y: auto; padding: 6px; display: flex; flex-direction: column; gap: 3px; }
+.fn-pal-actions, .fn-pal-add { border-bottom: 1px solid var(--border); padding: 6px; display: flex; flex-direction: column; gap: 6px; }
+.fn-pal-actions button, .fn-pal-add button {
+  background: var(--accent); color: #fff; border: none; border-radius: 4px;
+  padding: 5px 8px; font-family: sans-serif; font-size: 12px; cursor: pointer;
+}
+.fn-pal-add input, .fn-pal-add textarea {
+  background: var(--bg); color: var(--text); border: 1px solid var(--border);
+  border-radius: 4px; padding: 5px 7px; font-family: 'Consolas','Courier New',monospace; font-size: 12px; outline: none;
+}
+.fn-pal-add textarea { min-height: 52px; resize: vertical; }
+.fn-pal-add input:focus, .fn-pal-add textarea:focus { border-color: var(--accent); }
+.fn-pal-add-title { color: var(--text2); font-size: 11px; }
 .fn-pal-item {
   border: 1px solid transparent; background: transparent; color: var(--text);
   text-align: left; font-family: 'Consolas','Courier New',monospace; font-size: 12px;
@@ -698,8 +712,9 @@ canvas#flameCanvas { display: block; width: 100%; }
           <input id="codeFilename" value="snippet-1.js" spellcheck="false" title="Click to rename" />
           <button class="mode-btn active" data-mode="js">JS</button>
           <button class="mode-btn" data-mode="react">React</button>
-          <button id="btnImportFile" title="Import .js or .jsx file from computer">⬆ Import</button>
-          <input id="fileImportInput" type="file" accept=".js,.jsx,.ts,.tsx,.mjs" style="display:none" />
+          <button class="mode-btn" data-mode="css">CSS</button>
+          <button id="btnImportFile" title="Import .js, .jsx or .css file from computer">⬆ Import</button>
+          <input id="fileImportInput" type="file" accept=".js,.jsx,.ts,.tsx,.mjs,.css" style="display:none" />
           <button id="fnPaletteToggle" title="Common functions">Functions</button>
           <button id="clearOutputBtn">Clear output</button>
           <button id="runSnippetBtn">▶ Run &nbsp;<span style="opacity:.55;font-size:10px;">Ctrl+Enter</span></button>
@@ -726,6 +741,15 @@ canvas#flameCanvas { display: block; width: 100%; }
         </div>
         <div id="fnPalette" aria-hidden="true">
           <div class="fn-pal-head"><span>Common</span><button id="fnPaletteClose" title="Close">×</button></div>
+          <div class="fn-pal-actions">
+            <button id="btnCreateReactProject" type="button">Create React project folder</button>
+          </div>
+          <div class="fn-pal-add">
+            <div class="fn-pal-add-title">Add function snippet</div>
+            <input id="fnSnippetLabel" placeholder="Label e.g. apiCall()" spellcheck="false" />
+            <textarea id="fnSnippetCode" placeholder="Code to insert" spellcheck="false"></textarea>
+            <button id="btnAddFnSnippet" type="button">Add to current list</button>
+          </div>
           <div id="fnPaletteList"></div>
         </div>
       </div>
@@ -1873,6 +1897,7 @@ document.getElementById('btnRun').addEventListener('click', ()=>{
     input.addEventListener('keydown', function(e) {
     var open = getBox().style.display !== 'none' && activeInput === input;
     if (open && handleNumberShortcut(e)) return;
+    if (open && e.key === 'ArrowRight') { hide(); return; }
     if (handlePairedKey(input, e)) { hide(); e.stopPropagation(); return; }
     if (e.key === 'Tab') {
       if (!open) {
@@ -2103,6 +2128,7 @@ function showStyles(node){
 
   var SNIPPETS_KEY = 'dt_snippets';
   var SNIPPETS_META_KEY = 'dt_snippets_meta';
+  var FUNCTION_SNIPPETS_KEY = 'dt_function_snippets';
 
   function cloneDefaultSnippets() {
     return DEFAULT_SNIPPETS.map(function(s){
@@ -2118,8 +2144,16 @@ function showStyles(node){
       if (!isFinite(id) || ids[id]) id = i + 1;
       ids[id] = 1;
       var name = (s && typeof s.name === 'string' && s.name.trim()) ? s.name.trim() : 'snippet-'+id+'.js';
-      var mode = s && s.mode === 'react' ? 'react' : 'js';
-      return { id:id, name:name, mode:mode, code:String((s && s.code) || '') };
+      var mode = s && (s.mode === 'react' || s.mode === 'css') ? s.mode : 'js';
+      return {
+        id:id,
+        name:name,
+        mode:mode,
+        code:String((s && s.code) || ''),
+        projectId:s && s.projectId || null,
+        projectName:s && s.projectName || '',
+        projectRole:s && s.projectRole || ''
+      };
     });
   }
 
@@ -2127,8 +2161,20 @@ function showStyles(node){
     try { return JSON.parse(localStorage.getItem(key) || 'null'); }
     catch(e) { return null; }
   }
+  function normalizeFunctionSnippets(raw) {
+    if(!Array.isArray(raw)) return [];
+    return raw.filter(function(x){ return x && x.label && x.insert; }).map(function(x, i){
+      return {
+        id:x.id || ('custom-'+i+'-'+Date.now()),
+        mode:x.mode === 'react' ? 'react' : 'js',
+        label:String(x.label),
+        insert:String(x.insert)
+      };
+    });
+  }
 
   var snippets  = normalizeSnippets(readJson(SNIPPETS_KEY)) || cloneDefaultSnippets();
+  var customFunctionSnippets = normalizeFunctionSnippets(readJson(FUNCTION_SNIPPETS_KEY));
   var meta      = readJson(SNIPPETS_META_KEY) || {};
   var activeId  = snippets.some(function(s){ return s.id === meta.activeId; }) ? meta.activeId : snippets[0].id;
   var nextId    = Math.max.apply(null, snippets.map(function(s){ return s.id; })) + 1;
@@ -2172,6 +2218,9 @@ function showStyles(node){
         savedAt: new Date().toISOString()
       }));
     }catch(e){}
+  }
+  function saveFunctionSnippets(){
+    try{ localStorage.setItem(FUNCTION_SNIPPETS_KEY, JSON.stringify(customFunctionSnippets)); }catch(e){}
   }
   function saveAll(){ commitCurrentSnippet(); save(); }
   var saveTimer = null;
@@ -2250,12 +2299,20 @@ function showStyles(node){
   /* Sidebar */
   function renderFileList(){
     fileList.innerHTML = '';
+    var renderedProjects = {};
     snippets.forEach(function(s){
+      if(s.projectId && !renderedProjects[s.projectId]){
+        renderedProjects[s.projectId] = 1;
+        var group = document.createElement('div');
+        group.className = 'project-group';
+        group.textContent = s.projectName || 'React Project';
+        fileList.appendChild(group);
+      }
       var item = document.createElement('div');
-      item.className = 'file-item' + (s.id===activeId?' active':'');
-      var icon = s.mode==='react' ? '\u269b' : '\u{1F4C4}';
+      item.className = 'file-item' + (s.projectId ? ' project-file' : '') + (s.id===activeId?' active':'');
+      var icon = s.mode==='react' ? '\u269b' : s.mode==='css' ? '#' : '\u{1F4C4}';
       item.innerHTML =
-        '<span class="fi-icon">'+(s.mode==='react'?'&#x269B;':'&#128196;')+'</span>'+
+        '<span class="fi-icon">'+(s.mode==='react'?'&#x269B;':s.mode==='css'?'#':'&#128196;')+'</span>'+
         '<span class="fi-name">'+esc(s.name)+'</span>'+
         '<button class="fi-del" title="Delete">\u00d7</button>';
       item.querySelector('.fi-del').addEventListener('click', function(e){
@@ -2292,6 +2349,7 @@ function showStyles(node){
     renderFunctionPalette();
     clearSrcOutput();
     if(srcMode==='react') switchOutTab('preview');
+    else if(srcMode==='css' && s.projectId) switchOutTab('preview');
     else switchOutTab('console');
   }
 
@@ -2323,7 +2381,7 @@ function showStyles(node){
     reader.onload = function(ev){
       var code = ev.target.result;
       var name = file.name;
-      var mode = /\.jsx$|\.tsx$/.test(name) ? 'react' : 'js';
+      var mode = /\.css$/i.test(name) ? 'css' : /\.jsx$|\.tsx$/i.test(name) ? 'react' : 'js';
       // Save current snippet edits before adding the imported file.
       commitCurrentSnippet();
       // Create new snippet from file
@@ -2344,7 +2402,7 @@ function showStyles(node){
       srcMode = btn.dataset.mode;
       document.querySelectorAll('.mode-btn').forEach(function(b){ b.classList.toggle('active', b===btn); });
       var s = currentSnippet(); if(s) s.mode = srcMode;
-      if(srcMode==='react') switchOutTab('preview'); else switchOutTab('console');
+      if(srcMode==='react' || (srcMode==='css' && s && s.projectId)) switchOutTab('preview'); else switchOutTab('console');
       renderFunctionPalette();
       save();
     });
@@ -2400,7 +2458,9 @@ function showStyles(node){
   }
   function renderFunctionPalette(){
     if(!fnPaletteList) return;
-    var list = srcMode === 'react' ? REACT_FUNCTIONS : JS_FUNCTIONS;
+    var palMode = srcMode === 'react' ? 'react' : 'js';
+    var list = (palMode === 'react' ? REACT_FUNCTIONS : JS_FUNCTIONS)
+      .concat(customFunctionSnippets.filter(function(item){ return item.mode === palMode; }));
     fnPaletteList.innerHTML = '';
     list.forEach(function(item){
       var btn = document.createElement('button');
@@ -2412,6 +2472,53 @@ function showStyles(node){
       fnPaletteList.appendChild(btn);
     });
   }
+  function addCustomFunctionSnippet(){
+    var labelEl = document.getElementById('fnSnippetLabel');
+    var codeEl = document.getElementById('fnSnippetCode');
+    if(!labelEl || !codeEl) return;
+    var label = labelEl.value.trim();
+    var insert = codeEl.value;
+    if(!label || !insert.trim()) return;
+    customFunctionSnippets.push({
+      id:'custom-fn-'+Date.now(),
+      mode:srcMode === 'react' ? 'react' : 'js',
+      label:label,
+      insert:insert
+    });
+    labelEl.value = '';
+    codeEl.value = '';
+    saveFunctionSnippets();
+    renderFunctionPalette();
+  }
+  function createReactProjectFolder(){
+    commitCurrentSnippet();
+    var projectId = 'react-project-'+Date.now();
+    var existingProjects = {};
+    snippets.forEach(function(s){ if(s.projectId) existingProjects[s.projectId] = 1; });
+    var projectName = 'React Project '+(Object.keys(existingProjects).length + 1);
+    var mainId = nextId++, appId = nextId++, utilId = nextId++, cssId = nextId++;
+    snippets.push({
+      id:mainId, name:'main.jsx', mode:'react', projectId:projectId, projectName:projectName, projectRole:'main',
+      code:"import App from './App.jsx';\nimport './styles.css';\n\nReactDOM.createRoot(document.getElementById('root')).render(<App />);"
+    });
+    snippets.push({
+      id:appId, name:'App.jsx', mode:'react', projectId:projectId, projectName:projectName, projectRole:'component',
+      code:"import { formatCount } from './utils.js';\n\nexport default function App() {\n  const [count, setCount] = React.useState(0);\n\n  return (\n    <main className=\"app-shell\">\n      <h1>Hello React Project</h1>\n      <button onClick={() => setCount(count + 1)}>{formatCount(count)}</button>\n    </main>\n  );\n}"
+    });
+    snippets.push({
+      id:utilId, name:'utils.js', mode:'js', projectId:projectId, projectName:projectName, projectRole:'helper',
+      code:"export function formatCount(count) {\n  return `Count: ${count}`;\n}"
+    });
+    snippets.push({
+      id:cssId, name:'styles.css', mode:'css', projectId:projectId, projectName:projectName, projectRole:'style',
+      code:"body {\n  margin: 0;\n  font-family: Inter, system-ui, sans-serif;\n  background: #101418;\n  color: #f6f8fa;\n}\n\n.app-shell {\n  min-height: 100vh;\n  display: grid;\n  place-items: center;\n  gap: 16px;\n}\n\nbutton {\n  border: 0;\n  border-radius: 6px;\n  padding: 10px 16px;\n  background: #4fc1ff;\n  color: #101418;\n  cursor: pointer;\n}"
+    });
+    activeId = mainId;
+    save();
+    renderFileList();
+    loadSnippet();
+    switchOutTab('preview');
+  }
   function setFunctionPalette(open){
     if(!fnPalette) return;
     fnPalette.classList.toggle('open', open);
@@ -2422,6 +2529,10 @@ function showStyles(node){
   if(fnPaletteToggle) fnPaletteToggle.addEventListener('click', function(){ setFunctionPalette(!fnPalette.classList.contains('open')); });
   var fnClose = document.getElementById('fnPaletteClose');
   if(fnClose) fnClose.addEventListener('click', function(){ setFunctionPalette(false); });
+  var addFnBtn = document.getElementById('btnAddFnSnippet');
+  if(addFnBtn) addFnBtn.addEventListener('click', addCustomFunctionSnippet);
+  var projectBtn = document.getElementById('btnCreateReactProject');
+  if(projectBtn) projectBtn.addEventListener('click', createReactProjectFolder);
 
   /* Filename rename */
   function saveFilename(){
@@ -2699,7 +2810,14 @@ function showStyles(node){
     addEntry('input-echo',
       '<span style="opacity:.5">\u25b6 </span><i style="color:var(--text2)">'+esc(fname)+'</i>', 'snippet');
 
+    if(s && s.projectId){ runReactProject(s); return; }
     if(srcMode==='react'){ runReact(code, fname); return; }
+    if(srcMode==='css'){
+      addSrcLog('info', 'CSS files run as part of a React project folder.');
+      srcRunStatus.textContent = 'CSS saved';
+      srcRunStatus.style.color = 'var(--text2)';
+      return;
+    }
 
     // JS mode
     // The sandbox iframe runs the code and proxies console back via postMessage.
@@ -2768,8 +2886,34 @@ function showStyles(node){
     }
   }
 
+  function prepareProjectCode(file){
+    return String(file.code || '')
+      .replace(/^\s*import\s+[^;]+;?\s*$/gm, '')
+      .replace(/^\s*export\s+default\s+/gm, '')
+      .replace(/^\s*export\s+/gm, '');
+  }
+  function reactProjectBundle(activeFile){
+    commitCurrentSnippet();
+    var files = snippets.filter(function(s){ return s.projectId === activeFile.projectId; });
+    var css = files.filter(function(s){ return s.mode === 'css'; }).map(function(s){ return s.code; }).join('\n\n');
+    var reactFiles = files.filter(function(s){ return s.mode !== 'css'; }).sort(function(a,b){
+      if(a.projectRole === 'main') return 1;
+      if(b.projectRole === 'main') return -1;
+      return a.id - b.id;
+    });
+    return {
+      name:activeFile.projectName || activeFile.name,
+      css:css,
+      code:reactFiles.map(function(s){ return '/* '+s.name+' */\n' + prepareProjectCode(s); }).join('\n\n')
+    };
+  }
+  function runReactProject(activeFile){
+    var bundle = reactProjectBundle(activeFile);
+    runReact(bundle.code, bundle.name, bundle.css);
+  }
+
   /* React runner — uses a Blob URL so no srcdoc escaping issues ever */
-  function runReact(code, fname){
+  function runReact(code, fname, css){
     switchOutTab('preview');
     srcRunStatus.textContent = '\u23f3 Loading React CDN\u2026';
     srcRunStatus.style.color = 'var(--text2)';
@@ -2790,6 +2934,7 @@ function showStyles(node){
       '#dt-err{color:#f44747;background:rgba(244,71,71,.08);padding:16px;',
       '  font-family:monospace;font-size:13px;white-space:pre-wrap;',
       '  border-left:3px solid #f44747;margin:16px;}',
+      String(css || ''),
       '</style></head><body>',
       '<div id="loading"><div class="spin"></div>Loading React\u2026</div>',
       '<div id="root"></div>',
@@ -2887,6 +3032,7 @@ function showStyles(node){
   /* Boot */
   renderFileList();
   loadSnippet();
+  setFunctionPalette(true);
 
 })();
 
